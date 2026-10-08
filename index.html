@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
 <meta name="theme-color" content="#2f6fed">
 <script src="config.js"></script>
@@ -216,6 +216,32 @@
   .login-card .sub { color:var(--text-2); font-size:13.5px; margin-bottom:20px; }
   .login-err { color:var(--red); font-size:13px; min-height:18px; margin-bottom:8px; }
   body.locked #app { visibility:hidden; }
+
+  /* ---------- Responsivo ---------- */
+  @media (min-width: 700px) {
+    #app { max-width:none; }
+    header.topbar { padding:12px 24px; }
+    main { padding:18px 24px 48px 24px; }
+    .store-select { max-width:240px; }
+    .stat-grid { grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); }
+    .cards-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); column-gap:10px; align-items:start; align-content:start; }
+    .chart-wrap svg { max-height:300px; }
+    .cards-grid > :not(.card):not(.move-item) { grid-column:1 / -1; }
+    .chip-scroll { flex-wrap:wrap; overflow-x:visible !important; }
+    .overlay { align-items:center; padding:24px; }
+    .sheet { max-width:640px; border-radius:20px; max-height:90vh; padding-top:22px; animation:popIn .18s ease-out; }
+    .sheet-handle { display:none; }
+  }
+  @media (min-width: 1024px) {
+    .drawer { transform:none; width:250px; max-width:250px; border-right:1px solid var(--border); z-index:30; }
+    .drawer-overlay, .drawer-overlay.open { display:none !important; }
+    .menu-btn { display:none; }
+    #app { margin-left:250px; }
+    header.topbar, main { padding-left:max(28px, calc((100% - 1200px) / 2)); padding-right:max(28px, calc((100% - 1200px) / 2)); }
+    .sheet { max-width:700px; }
+    .toast { left:calc(50% + 125px); }
+  }
+  @keyframes popIn { from{transform:scale(.97);opacity:0;} to{transform:scale(1);opacity:1;} }
 </style>
 </head>
 <body class="locked">
@@ -441,11 +467,29 @@ function buildDrawer() {
 }
 function openDrawer() { buildDrawer(); drawer.classList.add("open"); drawerOverlay.classList.add("open"); }
 function closeDrawer() { drawer.classList.remove("open"); drawerOverlay.classList.remove("open"); }
+function syncDrawer() { if (window.matchMedia && window.matchMedia("(min-width: 1024px)").matches) buildDrawer(); }
+(function(){ var mq = window.matchMedia && window.matchMedia("(min-width: 1024px)");
+  if (mq && mq.addEventListener) mq.addEventListener("change", syncDrawer); })();
+// Listas em colunas em telas largas: marca os blocos que têm vários cartões
+(function(){ var pend = false;
+  new MutationObserver(function(){
+    if (pend) return; pend = true;
+    requestAnimationFrame(function(){ pend = false;
+      content.querySelectorAll(".card, .move-item").forEach(function(el){
+        var p = el.parentNode;
+        if (!p || p.classList.contains("cards-grid") || p.classList.contains("sheet")) return;
+        var n = 0; for (var i = 0; i < p.children.length; i++) { var k = p.children[i].classList; if (k.contains("card") || k.contains("move-item")) n++; }
+        if (n >= 2) p.classList.add("cards-grid");
+      });
+    });
+  }).observe(content, {childList:true, subtree:true});
+})();
 document.getElementById("menuBtn").addEventListener("click", openDrawer);
 drawerOverlay.addEventListener("click", closeDrawer);
 
 function navigate(route) {
   currentRoute = route;
+  syncDrawer();
   var r = ROUTES[route];
   pageTitle.textContent = r.title;
   storeSelect.style.display = r.storeScoped ? "" : "none";
@@ -493,6 +537,7 @@ storeSelect.addEventListener("change", function () {
 });
 
 function renderOpBar() {
+  syncDrawer();
   var name = currentEmployeeName || "—";
   var e = currentEmployeeId ? employees[currentEmployeeId] : null;
   var roleTxt = e && e.role ? ' <span style="color:var(--text-2)">(' + esc(e.role) + ')</span>' : '';
@@ -687,7 +732,7 @@ function renderEstoque() {
   // filtro por gênero
   var catIds = categoryOrder.filter(function(cid){ return productOrder.some(function(pid){ return products[pid].categoryId === cid; }); });
   var hasNone = productOrder.some(function(pid){ return !products[pid].categoryId || !categories[products[pid].categoryId]; });
-  html += '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;-webkit-overflow-scrolling:touch;">' +
+  html += '<div class="chip-scroll" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;-webkit-overflow-scrolling:touch;">' +
     '<div class="chip' + (!estoqueCatFilter ? " selected" : "") + '" data-ecat="" style="white-space:nowrap;">Todos</div>' +
     catIds.map(function(cid){ return '<div class="chip' + (estoqueCatFilter===cid ? " selected" : "") + '" data-ecat="' + cid + '" style="white-space:nowrap;">' + esc(categories[cid].name) + '</div>'; }).join("") +
     (hasNone ? '<div class="chip' + (estoqueCatFilter==="_none" ? " selected" : "") + '" data-ecat="_none" style="white-space:nowrap;">Sem gênero</div>' : '') +
@@ -2942,7 +2987,7 @@ function renderRelatorios() {
   var html = '<div class="section-head"><h2>Relatórios</h2><button class="link-btn" id="rpReload">🔄 Atualizar</button></div>';
 
   // tipo de relatório
-  html += '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;">' +
+  html += '<div class="chip-scroll" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;">' +
     REPORT_TYPES.map(function(t){ return '<div class="chip' + (s.type===t.v?" selected":"") + '" data-rtype="' + t.v + '" style="white-space:nowrap;">' + t.l + '</div>'; }).join("") + '</div>';
 
   // período
@@ -3462,7 +3507,7 @@ function renderPrecos() {
     (semCusto ? ' <span style="color:var(--amber);font-weight:700;">' + semCusto + ' produto(s) ainda sem custo.</span>' : '') + '</div>' +
     '<div class="searchbar"><input id="pSearch" type="text" placeholder="Buscar produto..." value="' + esc(priceSearch) + '"></div>';
   var catIds = categoryOrder.filter(function(cid){ return productOrder.some(function(pid){ return products[pid].categoryId === cid; }); });
-  html += '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;">' +
+  html += '<div class="chip-scroll" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;">' +
     '<div class="chip' + (!priceCatFilter?" selected":"") + '" data-pcat="" style="white-space:nowrap;">Todos</div>' +
     catIds.map(function(cid){ return '<div class="chip' + (priceCatFilter===cid?" selected":"") + '" data-pcat="' + cid + '" style="white-space:nowrap;">' + esc(categories[cid].name) + '</div>'; }).join("") +
     '<div class="chip' + (priceCatFilter==="_none"?" selected":"") + '" data-pcat="_none" style="white-space:nowrap;">Sem gênero</div>' +
