@@ -1220,11 +1220,25 @@ function openEmployeeForm(id) {
     var name = document.getElementById("eName").value.trim();
     if (!name) { showToast("Informe o nome"); return; }
     var data = {name:name, role:document.getElementById("eRole").value, storeIds:selected, active:true, fridgeAccess: document.getElementById("eFridge").checked};
+    // Acesso preenchido mas sem tocar em "Criar acesso"/"Redefinir senha": o Salvar também aplica.
+    var accPwEl = document.getElementById("accPw"), accNewEl = document.getElementById("accNewPw");
+    var pendLogin = accPwEl && accPwEl.value ? document.getElementById("accLogin").value.trim().toLowerCase() : null;
+    var pendPw = accPwEl ? accPwEl.value : "";
+    var pendNewPw = accNewEl ? accNewEl.value : "";
+    if (pendLogin !== null) {
+      if (!/^[a-z0-9._-]{3,30}$/.test(pendLogin)) { showToast("Usuário: 3 a 30 letras minúsculas, números, ponto ou hífen (sem espaço)"); return; }
+      if (pendPw.length < 6) { showToast("A senha precisa ter pelo menos 6 caracteres"); return; }
+    }
+    if (pendNewPw && pendNewPw.length < 6) { showToast("A nova senha precisa ter pelo menos 6 caracteres"); return; }
     var p = e ? db.doc("employees/"+id).update(data) : db.collection("employees").add(Object.assign({createdAt:Date.now()},data));
     p.then(function(){
-      closeSheet(); showToast("Funcionário salvo");
+      if (e && pendLogin !== null) return db.rpc("admin_create_login", {p_employee_id: e.id, p_login: pendLogin, p_password: pendPw, p_domain: SB.domain}).then(function(){ return "Funcionário salvo e acesso criado: usuário " + pendLogin; });
+      if (e && pendNewPw) return db.rpc("admin_set_password", {p_employee_id: e.id, p_password: pendNewPw}).then(function(){ return "Funcionário salvo e senha redefinida"; });
+      return "Funcionário salvo";
+    }).then(function(msg){
+      closeSheet(); showToast(msg);
       if (e && currentEmployeeId===id) { currentEmployeeName = name; lsSet("currentEmployeeName", name); renderOpBar(); }
-    }).catch(function(){ showToast("Erro ao salvar"); });
+    }).catch(function(err){ showToast("Erro: " + errMsg(err)); });
   });
   if (e) bindEmployeeAccess(e);
   if (e) document.getElementById("bDel").addEventListener("click", function(){
