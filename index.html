@@ -77,6 +77,7 @@
     margin:18px 18px 8px 18px; }
   .drawer .item { padding:12px 18px; font-size:15px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:10px; }
   .drawer .item.active { color:var(--accent); background:var(--accent-2); }
+  .drawer .item-logout { color:var(--red); margin-top:14px; border-top:1px solid var(--border); padding-top:16px; }
   .drawer .brand { font-size:17px; font-weight:800; padding:0 18px 12px 18px; border-bottom:1px solid var(--border); margin-bottom:6px; }
 
   .searchbar { display:flex; align-items:center; background:var(--surface); border:1px solid var(--border);
@@ -445,8 +446,10 @@ function buildDrawer() {
   html += '<h3>Operacional</h3>';
   if (isFridgeOnly()) {
     html += '<div class="item' + (currentRoute==="geladeira"?" active":"") + '" data-route="geladeira">🧊 Contagem de geladeira</div>';
+    html += '<div class="item item-logout" data-logout="1">🚪 Sair do sistema</div>';
     drawer.innerHTML = html;
     drawer.querySelectorAll("[data-route]").forEach(function(el){ el.addEventListener("click", function(){ navigate(el.getAttribute("data-route")); closeDrawer(); }); });
+    bindDrawerLogout();
     return;
   }
   ["painel","estoque","compras","geladeira","custos","vendas","tarefas","relatorios"].forEach(function(r){
@@ -460,9 +463,20 @@ function buildDrawer() {
   });
   html += '<h3>Acesso restrito</h3>';
   html += '<div class="item' + (currentRoute==="diretoria"?" active":"") + '" data-route="diretoria">🔒 Diretoria</div>';
+  html += '<div class="item item-logout" data-logout="1">🚪 Sair do sistema</div>';
   drawer.innerHTML = html;
+  bindDrawerLogout();
   drawer.querySelectorAll("[data-route]").forEach(function(el){
     el.addEventListener("click", function(){ navigate(el.getAttribute("data-route")); closeDrawer(); });
+  });
+}
+function bindDrawerLogout() {
+  var el = drawer.querySelector("[data-logout]");
+  if (el) el.addEventListener("click", function(){
+    if (!window.confirm("Deseja sair do sistema?")) return;
+    closeDrawer();
+    var done = function(){ location.reload(); };
+    SB.auth.signOut().then(done, done);
   });
 }
 function openDrawer() { buildDrawer(); drawer.classList.add("open"); drawerOverlay.classList.add("open"); }
