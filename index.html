@@ -1178,33 +1178,59 @@ function submitMovement(p, type, qty, note, lotNumber, expiryDate) {
 // ============================================================
 // PRODUTOS
 // ============================================================
+var prodCatFilter = "", prodCollapsed = {};
 function renderProdutos() {
   var list = productOrder.map(function(id){ return products[id]; });
   if (searchTerm) {
     var t = searchTerm.toLowerCase();
     list = list.filter(function(p){ return (p.name||"").toLowerCase().indexOf(t)!==-1; });
   }
+  if (prodCatFilter) list = list.filter(function(p){ return ((p.categoryId && categories[p.categoryId]) ? p.categoryId : "_none") === prodCatFilter; });
   var html = '<div class="section-head"><h2>Produtos</h2><button class="btn btn-primary btn-sm" id="bAdd">+ Novo</button></div>';
   html += '<div class="searchbar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>' +
     '<input id="searchInput" type="text" placeholder="Buscar produto..." value="' + esc(searchTerm) + '"></div>';
   html += '<button class="btn btn-secondary" id="bPrecos" style="margin-bottom:10px;">💲 Atualizar preços de produtos</button>';
   html += '<button class="link-btn" id="bCats">⚙ Gerenciar gêneros/categorias</button> &nbsp; <button class="link-btn" id="bImportP">⬇️ Importar catálogo padrão</button>';
   if (currentRole() === "Diretoria") html += ' &nbsp; <button class="link-btn" id="bProdHist">🕘 Histórico de alterações</button>';
+  // filtro por gênero
+  var pcats = categoryOrder.filter(function(cid){ return productOrder.some(function(pid){ return products[pid].categoryId === cid; }); })
+    .sort(function(a,b){ return categories[a].name.localeCompare(categories[b].name, "pt-BR"); });
+  var pNone = productOrder.some(function(pid){ return !products[pid].categoryId || !categories[products[pid].categoryId]; });
+  html += '<div class="chip-scroll" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin:10px 0;">' +
+    '<div class="chip' + (!prodCatFilter ? " selected" : "") + '" data-pcf="" style="white-space:nowrap;">Todos</div>' +
+    pcats.map(function(cid){ return '<div class="chip' + (prodCatFilter===cid ? " selected" : "") + '" data-pcf="' + cid + '" style="white-space:nowrap;">' + esc(categories[cid].name) + '</div>'; }).join("") +
+    (pNone ? '<div class="chip' + (prodCatFilter==="_none" ? " selected" : "") + '" data-pcf="_none" style="white-space:nowrap;">Sem gênero</div>' : '') +
+  '</div>';
   if (list.length === 0) {
-    html += '<div class="empty-state"><div class="emoji">🏷️</div>Nenhum produto cadastrado.</div>';
+    html += '<div class="empty-state"><div class="emoji">🏷️</div>' + (productOrder.length ? 'Nenhum produto encontrado.' : 'Nenhum produto cadastrado.') + '</div>';
   } else {
-    list.forEach(function(p){
-      var cat = categories[p.categoryId];
-      var w = weightLabel(p);
-      html += '<div class="card" data-open="' + esc(p.id) + '"><div class="info"><div class="name">' + esc(p.name) + '</div>' +
-        '<div class="meta">' + (w ? w + " · " : "") + typeLabel(p.unit) + (cat ? " · " + esc(cat.name) : "") + '</div>' +
-        (!p.cost ? '<span class="badge-low">Sem custo</span>' : '') + '</div>' +
-        '<div class="qty-block"><div class="qty">' + fmtMoney(p.cost||0) + '</div><div class="unit">por ' + typeLabel(p.unit).toLowerCase() + '</div></div></div>';
+    var groups = {}, gorder = [];
+    list.forEach(function(p){ var k = (p.categoryId && categories[p.categoryId]) ? p.categoryId : "_none"; if (!groups[k]) { groups[k] = []; gorder.push(k); } groups[k].push(p); });
+    gorder.sort(function(a,b){ var na = a==="_none" ? "zzz" : categories[a].name, nb = b==="_none" ? "zzz" : categories[b].name; return na.localeCompare(nb, "pt-BR"); });
+    gorder.forEach(function(k){
+      var items = groups[k];
+      var collapsed = !!prodCollapsed[k] && !searchTerm;
+      var semCusto = items.filter(function(p){ return !p.cost; }).length;
+      html += '<div data-pcollapse="' + k + '" style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px 0;cursor:pointer;user-select:none;">' +
+        '<div style="font-size:14px;font-weight:800;">' + (collapsed ? "▸ " : "▾ ") + esc(k==="_none" ? "Sem gênero" : categories[k].name) +
+        ' <span style="font-weight:500;color:var(--text-2);font-size:12.5px;">· ' + items.length + ' produto' + (items.length===1?'':'s') + '</span></div>' +
+        (semCusto ? '<span class="badge-low" style="margin-top:0;">' + semCusto + ' sem custo</span>' : '') +
+      '</div>';
+      if (collapsed) return;
+      items.forEach(function(p){
+        var w = weightLabel(p);
+        html += '<div class="card" data-open="' + esc(p.id) + '"><div class="info"><div class="name">' + esc(p.name) + '</div>' +
+          '<div class="meta">' + (w ? w + " · " : "") + typeLabel(p.unit) + '</div>' +
+          (!p.cost ? '<span class="badge-low">Sem custo</span>' : '') + '</div>' +
+          '<div class="qty-block"><div class="qty">' + fmtMoney(p.cost||0) + '</div><div class="unit">por ' + typeLabel(p.unit).toLowerCase() + '</div></div></div>';
+      });
     });
   }
   content.innerHTML = html;
   document.getElementById("bAdd").addEventListener("click", function(){ openProductForm(null); });
   document.getElementById("bCats").addEventListener("click", openCategoryManager);
+  content.querySelectorAll("[data-pcf]").forEach(function(ch){ ch.addEventListener("click", function(){ prodCatFilter = ch.getAttribute("data-pcf"); renderProdutos(); }); });
+  content.querySelectorAll("[data-pcollapse]").forEach(function(h){ h.addEventListener("click", function(){ var k = h.getAttribute("data-pcollapse"); prodCollapsed[k] = !prodCollapsed[k]; renderProdutos(); }); });
   var bph = document.getElementById("bProdHist"); if (bph) bph.addEventListener("click", function(){ openProductHistory(null); });
   document.getElementById("bPrecos").addEventListener("click", function(){ navigate("precos"); });
   document.getElementById("bImportP").addEventListener("click", function(){ importDefaults(true); });
