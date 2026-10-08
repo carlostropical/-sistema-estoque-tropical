@@ -1346,7 +1346,7 @@ function renderFuncionarios() {
       var e = employees[id];
       var storeNames = (e.storeIds||[]).map(function(sid){ return stores[sid]?stores[sid].name:""; }).filter(Boolean).join(", ");
       html += '<div class="card" data-open="' + id + '"><div class="info"><div class="name">' + esc(e.name) + '</div>' +
-        '<div class="meta">' + esc(e.role||"Operador") + (e.fridgeAccess && e.role!=="Contagem de Geladeira" ? " · 🧊" : "") + (storeNames?" · "+esc(storeNames):"") + '</div></div></div>';
+        '<div class="meta">' + esc(e.role||"Operador") + "" + (storeNames?" · "+esc(storeNames):"") + '</div></div></div>';
     });
   }
   content.innerHTML = html;
@@ -1362,8 +1362,8 @@ function openEmployeeForm(id) {
     (readOnly ? '<div class="sub" style="color:var(--amber);">Apenas a Diretoria pode editar ou excluir cadastros.</div>' : '') +
     '<div class="field"><label>Nome*</label><input type="text" id="eName" value="' + (e?esc(e.name):"") + '" ' + (readOnly?"disabled":"") + '></div>' +
     '<div class="field"><label>Função</label><select id="eRole" ' + (readOnly?"disabled":"") + '>' + ROLES.map(function(r){return '<option'+(e&&e.role===r?" selected":"")+'>'+r+'</option>';}).join("") + '</select></div>' +
-    '<div class="checkbox-row" style="margin-top:-4px;"><input type="checkbox" id="eFridge" ' + (e&&e.fridgeAccess?"checked":"") + ' ' + (readOnly?"disabled":"") + '><label for="eFridge">🧊 Acesso à Contagem de geladeira</label></div>' +
-    '<div style="font-size:11.5px;color:var(--text-2);margin:-8px 0 12px 0;">Gerência e Diretoria já têm acesso. A função <b>Contagem de Geladeira</b> dá acesso <b>somente</b> a esta tela.</div>' +
+    '<input type="checkbox" id="eFridge" style="display:none;" ' + (e&&e.fridgeAccess?"checked":"") + '>' +
+    '<div style="font-size:11.5px;color:var(--text-2);margin:-6px 0 12px 0;">🧊 Todos os funcionários podem fazer a Contagem de geladeira. A função <b>Contagem de Geladeira</b> dá acesso <b>somente</b> a esta tela.</div>' +
     '<div class="field"><label>Lojas vinculadas</label><div class="chip-group" id="eStores">' +
     storeOrder.map(function(sid){ return '<div class="chip' + (storeIds.indexOf(sid)!==-1?" selected":"") + '" data-sid="' + sid + '">' + esc(stores[sid].name) + '</div>'; }).join("") + '</div></div>' +
     (e && !readOnly ? employeeAccessHtml(e) : (e && e.login ? '<div class="sub">Usuário de acesso: <b>' + esc(e.login) + '</b></div>' : '')) +
@@ -3349,11 +3349,7 @@ var fridgeStatusText = "";
 
 function isFridgeOnly() { return currentRole() === FRIDGE_ROLE; }
 function canFridge() {
-  var r = currentRole();
-  if (!r) return false;
-  if (r === FRIDGE_ROLE || r === "Gerência" || r === "Diretoria") return true;
-  var e = employees[currentEmployeeId];
-  return !!(e && e.fridgeAccess);
+  return !!(currentEmployeeId && employees[currentEmployeeId]);
 }
 function canManageFridge() { var r = currentRole(); return r === "Gerência" || r === "Diretoria"; }
 function fridgeItems() {
