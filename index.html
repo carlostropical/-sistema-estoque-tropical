@@ -644,13 +644,24 @@ function openPinPrompt(empId) {
 // ============================================================
 // PAINEL (dashboard)
 // ============================================================
+// Produto vinculado a lojas: sem lojas marcadas = vale para todas; o Estoque Central vê todos.
+function productInStore(pid, sid) {
+  var p = products[pid]; if (!p) return false;
+  var s = stores[sid]; if (!s || s.isCentral) return true;
+  return !p.storeIds || !p.storeIds.length || p.storeIds.indexOf(sid) !== -1;
+}
+function storeProductOrder(sid) { return productOrder.filter(function(pid){ return productInStore(pid, sid); }); }
+function productStoresLabel(p) {
+  if (!p || !p.storeIds || !p.storeIds.length) return "";
+  return p.storeIds.filter(function(s){ return stores[s]; }).map(function(s){ return stores[s].name; }).join(", ");
+}
 function renderPainel() {
   var storeId = currentStoreId;
   if (!storeId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
   var storeName = stores[storeId] ? stores[storeId].name : "";
 
-  var lowStockCount = 0, totalItems = productOrder.length;
-  productOrder.forEach(function(pid){
+  var lowStockCount = 0, totalItems = storeProductOrder(currentStoreId).length;
+  storeProductOrder(currentStoreId).forEach(function(pid){
     var p = products[pid];
     var st = scopedStock[pid];
     var qty = st ? st.quantity : 0;
@@ -731,7 +742,7 @@ var estoqueAllMode = false, allStock = null, allStockLoading = false, allStockOn
 function renderEstoque() {
   if (estoqueAllMode) { renderAllStoresStock(); return; }
   if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
-  var list = productOrder.map(function(id){ return products[id]; });
+  var list = storeProductOrder(currentStoreId).map(function(id){ return products[id]; });
   if (searchTerm) {
     var t = searchTerm.toLowerCase();
     list = list.filter(function(p){ return (p.name||"").toLowerCase().indexOf(t)!==-1 || (p.sku||"").toLowerCase().indexOf(t)!==-1; });
@@ -753,8 +764,8 @@ function renderEstoque() {
     '<input id="searchInput" type="text" placeholder="Buscar produto ou código..." value="' + esc(searchTerm) + '"></div>';
 
   // filtro por gênero
-  var catIds = categoryOrder.filter(function(cid){ return productOrder.some(function(pid){ return products[pid].categoryId === cid; }); });
-  var hasNone = productOrder.some(function(pid){ return !products[pid].categoryId || !categories[products[pid].categoryId]; });
+  var catIds = categoryOrder.filter(function(cid){ return storeProductOrder(currentStoreId).some(function(pid){ return products[pid].categoryId === cid; }); });
+  var hasNone = storeProductOrder(currentStoreId).some(function(pid){ return !products[pid].categoryId || !categories[products[pid].categoryId]; });
   html += '<div class="chip-scroll" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;-webkit-overflow-scrolling:touch;">' +
     '<div class="chip' + (!estoqueCatFilter ? " selected" : "") + '" data-ecat="" style="white-space:nowrap;">Todos</div>' +
     catIds.map(function(cid){ return '<div class="chip' + (estoqueCatFilter===cid ? " selected" : "") + '" data-ecat="' + cid + '" style="white-space:nowrap;">' + esc(categories[cid].name) + '</div>'; }).join("") +
@@ -762,7 +773,7 @@ function renderEstoque() {
   '</div>';
 
   if (list.length === 0) {
-    html += productOrder.length === 0
+    html += storeProductOrder(currentStoreId).length === 0
       ? '<div class="empty-state"><div class="emoji">📦</div>Nenhum produto cadastrado.<br>Cadastre em "Produtos".</div>'
       : '<div class="empty-state"><div class="emoji">🔎</div>Nenhum produto encontrado.</div>';
   } else {
@@ -931,7 +942,7 @@ function countCatKey(pid) { var cid = products[pid].categoryId; return cid && ca
 function openCountForm() {
   if (!requireRole(COUNT_ROLES)) return;
   var byCat = {}, order = [];
-  productOrder.forEach(function(pid){ var k = countCatKey(pid); if (!byCat[k]) { byCat[k] = []; order.push(k); } byCat[k].push(pid); });
+  storeProductOrder(currentStoreId).forEach(function(pid){ var k = countCatKey(pid); if (!byCat[k]) { byCat[k] = []; order.push(k); } byCat[k].push(pid); });
   order.sort(function(a,b){ var na = a==="_none" ? "zzz" : categories[a].name, nb = b==="_none" ? "zzz" : categories[b].name; return na.localeCompare(nb, "pt-BR"); });
   if (countCatFilter && !byCat[countCatFilter]) countCatFilter = "";
   var html = '<h2>📋 Contagem de estoque</h2>' +
@@ -1221,6 +1232,7 @@ function renderProdutos() {
         var w = weightLabel(p);
         html += '<div class="card" data-open="' + esc(p.id) + '"><div class="info"><div class="name">' + esc(p.name) + '</div>' +
           '<div class="meta">' + (w ? w + " · " : "") + typeLabel(p.unit) + '</div>' +
+          (productStoresLabel(p) ? '<div class="meta" style="color:var(--accent);font-weight:600;">🏬 ' + esc(productStoresLabel(p)) + '</div>' : '') +
           (!p.cost ? '<span class="badge-low">Sem custo</span>' : '') + '</div>' +
           '<div class="qty-block"><div class="qty">' + fmtMoney(p.cost||0) + '</div><div class="unit">por ' + typeLabel(p.unit).toLowerCase() + '</div></div></div>';
       });
@@ -1285,6 +1297,13 @@ function openProductForm(id) {
     '</div>' +
     '<div class="field"><label id="pCostLabel">Custo do produto (R$ por ' + typeLabel(curType).toLowerCase() + ')*</label><input type="number" inputmode="decimal" id="pCost" placeholder="0,00" value="' + (p&&p.cost?esc(p.cost):"") + '" min="0" step="0.01" ' + dis + '></div>' +
     '<div class="field"><label>Gênero</label><select id="pCat" ' + dis + '>' + categoryOptionsHtml(p?p.categoryId:"") + '</select></div>' +
+    '<div class="field"><label>Lojas que usam este produto</label>' +
+      '<div style="font-size:11.5px;color:var(--text-2);margin:-2px 0 8px 0;">Nenhuma marcada = <b>todas as lojas</b>. O Estoque Central sempre vê todos os produtos.</div>' +
+      '<div class="chip-group" id="pStores">' + storeOrder.filter(function(sid){ return stores[sid] && !stores[sid].isCentral; }).map(function(sid){
+        var on = p && p.storeIds && p.storeIds.indexOf(sid) !== -1;
+        return '<div class="chip' + (on ? ' selected' : '') + '" data-psid="' + sid + '"' + (readOnly ? ' style="pointer-events:none;opacity:.8;"' : '') + '>' + esc(stores[sid].name) + '</div>';
+      }).join("") + '</div>' +
+      '<div id="pStoresInfo" style="font-size:12px;margin-top:6px;color:var(--accent);font-weight:600;"></div></div>' +
     '<details style="margin-bottom:14px;"><summary style="font-size:13px;font-weight:600;color:var(--text-2);cursor:pointer;padding:4px 0;">Mais opções</summary>' +
       '<div class="row2" style="margin-top:10px;"><div class="field"><label>Estoque mínimo</label><input type="number" inputmode="decimal" id="pMin" value="' + (p?fmtQtyRaw(p.minStock):"0") + '" min="0" step="any" ' + dis + '></div>' +
       '<div class="field"><label>Código (opcional)</label><input type="text" id="pSku" value="' + (p?esc(p.sku||""):"") + '" ' + dis + '></div></div>' +
@@ -1298,6 +1317,19 @@ function openProductForm(id) {
   document.getElementById("bCancel").addEventListener("click", closeSheet);
   var bphi = document.getElementById("bPHist"); if (bphi) bphi.addEventListener("click", function(){ openProductHistory(id); });
   if (readOnly) return;
+  var pStoreSel = (p && p.storeIds) ? p.storeIds.slice() : [];
+  function pStoresInfo() {
+    var el = document.getElementById("pStoresInfo"); if (!el) return;
+    el.textContent = pStoreSel.length ? "Somente: " + pStoreSel.map(function(s){ return stores[s] ? stores[s].name : ""; }).join(", ") : "Todas as lojas";
+  }
+  pStoresInfo();
+  sheet.querySelectorAll("[data-psid]").forEach(function(ch){
+    ch.addEventListener("click", function(){
+      var sid = ch.getAttribute("data-psid"), i = pStoreSel.indexOf(sid);
+      if (i === -1) { pStoreSel.push(sid); ch.classList.add("selected"); } else { pStoreSel.splice(i, 1); ch.classList.remove("selected"); }
+      pStoresInfo();
+    });
+  });
   document.getElementById("pUnit").addEventListener("change", function(e){
     document.getElementById("pCostLabel").textContent = "Custo do produto (R$ por " + typeLabel(e.target.value).toLowerCase() + ")*";
   });
@@ -1316,7 +1348,8 @@ function openProductForm(id) {
       categoryId: document.getElementById("pCat").value || null,
       sku: document.getElementById("pSku").value.trim(),
       minStock: parseFloat(document.getElementById("pMin").value) || 0,
-      perishable: document.getElementById("pPer").checked
+      perishable: document.getElementById("pPer").checked,
+      storeIds: storeOrder.filter(function(s){ return pStoreSel.indexOf(s) !== -1; })
     };
     var btn = document.getElementById("bSave");
     if (!p) {
@@ -1342,12 +1375,13 @@ function openProductForm(id) {
 }
 
 // ---------- Alteração/exclusão de produto: senha da Diretoria + motivo + histórico ----------
-var PRODUCT_FIELD_LABELS = {name:"Nome", weight:"Peso", weightUnit:"Unidade do peso", unit:"Tipo", cost:"Custo", categoryId:"Gênero", sku:"Código", minStock:"Estoque mínimo", perishable:"Perecível"};
+var PRODUCT_FIELD_LABELS = {name:"Nome", weight:"Peso", weightUnit:"Unidade do peso", unit:"Tipo", cost:"Custo", categoryId:"Gênero", sku:"Código", minStock:"Estoque mínimo", perishable:"Perecível", storeIds:"Lojas"};
 function productFieldText(f, v) {
   if (f === "categoryId") return v && categories[v] ? categories[v].name : "Sem gênero";
   if (f === "unit") return typeLabel(v);
   if (f === "cost") return fmtMoney(v || 0);
   if (f === "perishable") return v ? "Sim" : "Não";
+  if (f === "storeIds") return v && v.length ? v.map(function(s){ return stores[s] ? stores[s].name : "?"; }).join(", ") : "Todas as lojas";
   if (v === null || v === undefined || v === "") return "—";
   return String(v);
 }
@@ -1357,6 +1391,7 @@ function productChanges(p, data) {
     var a = p[f], b = data[f];
     if (f === "weight" || f === "cost" || f === "minStock") { a = parseFloat(a) || 0; b = parseFloat(b) || 0; }
     else if (f === "perishable") { a = !!a; b = !!b; }
+    else if (f === "storeIds") { a = (a || []).slice().sort().join(","); b = (b || []).slice().sort().join(","); }
     else { a = (a === undefined || a === null) ? "" : a; b = (b === undefined || b === null) ? "" : b; }
     if (f === "weightUnit" && !(parseFloat(data.weight) > 0) && !(parseFloat(p.weight) > 0)) return;
     if (a !== b) out.push({field:f, label:PRODUCT_FIELD_LABELS[f], from:productFieldText(f, p[f]), to:productFieldText(f, data[f])});
@@ -1853,7 +1888,7 @@ function openOrderForm() {
   document.getElementById("bOrderConfirm").addEventListener("click", function(){ submitOrder(centralId); });
 }
 function catProducts(catId) {
-  return productOrder.filter(function(pid){ return (products[pid].categoryId || "") === catId; });
+  return storeProductOrder(currentStoreId).filter(function(pid){ return (products[pid].categoryId || "") === catId; });
 }
 function isCatLoaded(catId) {
   return orderDraftItems.some(function(it){ return it.catId === catId; });
@@ -1907,7 +1942,7 @@ function renderOrderItemRows() {
     html += '<div class="item-row" style="margin-top:10px;">' +
       '<div style="display:flex;gap:6px;align-items:center;">' +
         '<select class="pname" data-idx="' + idx + '" data-f="productId" style="flex:1;min-width:0;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:14px;"><option value="">Selecione o produto</option>' +
-        productOrder.map(function(pid){ return '<option value="'+pid+'"'+(it.productId===pid?" selected":"")+'>'+esc(products[pid].name)+'</option>'; }).join("") + '</select>' +
+        storeProductOrder(currentStoreId).map(function(pid){ return '<option value="'+pid+'"'+(it.productId===pid?" selected":"")+'>'+esc(products[pid].name)+'</option>'; }).join("") + '</select>' +
         '<button data-rm="' + idx + '" style="background:none;border:none;color:var(--red);font-size:18px;cursor:pointer;">✕</button>' +
       '</div>' +
       '<div class="row2" style="margin-top:8px;">' +
@@ -2488,7 +2523,7 @@ function renderReturnItemRows() {
     var avail = st ? st.quantity : (it.productId ? 0 : null);
     html += '<div class="purchase-item-row">' +
       '<select class="pname" data-idx="' + idx + '" data-f="productId"><option value="">Produto</option>' +
-      productOrder.map(function(pid){return '<option value="'+pid+'"'+(it.productId===pid?" selected":"")+'>'+esc(products[pid].name)+'</option>';}).join("") + '</select>' +
+      storeProductOrder(currentStoreId).map(function(pid){return '<option value="'+pid+'"'+(it.productId===pid?" selected":"")+'>'+esc(products[pid].name)+'</option>';}).join("") + '</select>' +
       '<input class="pqty" type="number" placeholder="Qtd" data-idx="' + idx + '" data-f="qty" value="' + esc(it.qty) + '">' +
       '<button class="rm" data-rm="' + idx + '">✕</button></div>' +
       (avail!==null ? '<div style="font-size:11.5px;color:var(--text-2);margin:-4px 0 6px 2px;">Disponível nesta loja: ' + fmtQty(avail) + '</div>' : '');
