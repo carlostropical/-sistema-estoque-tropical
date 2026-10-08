@@ -78,6 +78,8 @@
   .drawer .item { padding:12px 18px; font-size:15px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:10px; }
   .drawer .item.active { color:var(--accent); background:var(--accent-2); }
   .drawer .item-logout { color:var(--red); margin-top:14px; border-top:1px solid var(--border); padding-top:16px; }
+  .pend-row { background:var(--amber-bg) !important; border-color:var(--amber) !important; }
+  .pend-txt { color:var(--amber); font-weight:700; }
   .drawer .brand { font-size:17px; font-weight:800; padding:0 18px 12px 18px; border-bottom:1px solid var(--border); margin-bottom:6px; }
 
   .searchbar { display:flex; align-items:center; background:var(--surface); border:1px solid var(--border);
@@ -738,8 +740,8 @@ function renderEstoque() {
 
   var html = '';
   var isCentralStore = stores[currentStoreId] && stores[currentStoreId].isCentral;
-  if (isCentralStore) {
-    var last = scopedCounts[0];
+  if (COUNT_ROLES.indexOf(currentRole()) !== -1) {
+    var last = scopedCounts.filter(function(x){ return !x.partial; })[0];
     html += '<div class="item-row" style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;">' +
       '<div style="font-size:13px;">📋 Última contagem: ' + (last ? '<b>' + fmtDateShort(last.date) + '</b> · ' + fmtMoney(last.totalValue) : '<b>nenhuma</b>') + '</div>' +
       '<button class="btn btn-primary btn-sm" id="bCount">Contagem de estoque</button></div>';
@@ -923,39 +925,126 @@ function bindAllStores() {
 }
 
 // ---------- CONTAGEM DE ESTOQUE (base do CMV geral) ----------
+var COUNT_ROLES = ["Operador de Loja","Operador de Estoque","Gerência","Diretoria"];
+var countCatFilter = "";
+function countCatKey(pid) { var cid = products[pid].categoryId; return cid && categories[cid] ? cid : "_none"; }
 function openCountForm() {
-  if (!requireRole(["Operador de Estoque","Gerência","Diretoria"])) return;
+  if (!requireRole(COUNT_ROLES)) return;
+  var byCat = {}, order = [];
+  productOrder.forEach(function(pid){ var k = countCatKey(pid); if (!byCat[k]) { byCat[k] = []; order.push(k); } byCat[k].push(pid); });
+  order.sort(function(a,b){ var na = a==="_none" ? "zzz" : categories[a].name, nb = b==="_none" ? "zzz" : categories[b].name; return na.localeCompare(nb, "pt-BR"); });
+  if (countCatFilter && !byCat[countCatFilter]) countCatFilter = "";
   var html = '<h2>📋 Contagem de estoque</h2>' +
-    '<div class="sub">' + esc(stores[currentStoreId].name) + ' — informe a quantidade contada de cada produto. O campo já vem com o saldo do sistema; altere só o que for diferente.</div>' +
+    '<div class="sub">' + esc(stores[currentStoreId].name) + ' — informe a quantidade contada. O campo já vem com o saldo do sistema; altere só o que for diferente. ' +
+    'Use <b>💾 Salvar este gênero</b> para ir salvando aos poucos.</div>' +
     '<div class="field"><label>Data da contagem</label><input type="date" id="cntDate" value="' + todayStr() + '"></div>' +
+    '<div class="chip-scroll" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;">' +
+      '<div class="chip' + (!countCatFilter ? ' selected' : '') + '" data-ccat="" style="white-space:nowrap;">Todos</div>' +
+      order.map(function(k){ return '<div class="chip' + (countCatFilter===k ? ' selected' : '') + '" data-ccat="' + k + '" style="white-space:nowrap;">' + esc(k==="_none" ? "Sem gênero" : categories[k].name) + '</div>'; }).join("") +
+    '</div>' +
     '<div class="searchbar"><input id="cntSearch" type="text" placeholder="Filtrar produto..."></div>';
-  var byCat = {};
-  productOrder.forEach(function(pid){
-    var c = products[pid].categoryId && categories[products[pid].categoryId] ? categories[products[pid].categoryId].name : "Sem gênero";
-    (byCat[c] = byCat[c] || []).push(pid);
-  });
-  Object.keys(byCat).sort(function(a,b){ return a.localeCompare(b,"pt-BR"); }).forEach(function(cat){
-    html += '<div class="chart-title cnt-cat" style="margin-top:12px;">' + esc(cat) + '</div>';
-    byCat[cat].forEach(function(pid){
+  order.forEach(function(k){
+    var name = k==="_none" ? "Sem gênero" : categories[k].name;
+    html += '<div class="cnt-sec" data-sec="' + k + '"' + (countCatFilter && countCatFilter !== k ? ' style="display:none;"' : '') + '>' +
+      '<div class="cnt-cat" style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:14px;padding-bottom:4px;border-bottom:2px solid var(--border);">' +
+        '<div><div style="font-weight:800;font-size:14px;">' + esc(name) + ' <span style="font-weight:500;color:var(--text-2);font-size:12px;">(' + byCat[k].length + ')</span></div>' +
+        '<div class="cnt-status" data-st="' + k + '" style="font-size:11.5px;color:var(--text-2);"></div></div>' +
+        '<button class="btn btn-secondary btn-sm cnt-savecat" data-save="' + k + '" type="button">💾 Salvar este gênero</button></div>';
+    byCat[k].forEach(function(pid){
       var p = products[pid];
       var sys = scopedStock[pid] ? scopedStock[pid].quantity : 0;
-      html += '<div class="cnt-row" data-name="' + esc((p.name||"").toLowerCase()) + '" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">' +
-        '<div style="flex:1;min-width:0;font-size:14px;">' + esc(p.name) + '<div style="font-size:11.5px;color:var(--text-2);">Sistema: ' + fmtQty(sys) + ' ' + esc(p.unit||"un") + (p.cost ? ' · ' + fmtMoney(p.cost) + '/' + esc(p.unit||"un") : ' · <span style="color:var(--amber)">sem custo</span>') + '</div></div>' +
-        '<input type="number" inputmode="decimal" min="0" step="any" class="cntQty" data-pid="' + pid + '" value="' + sys + '" style="width:80px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:15px;text-align:right;">' +
+      html += '<div class="cnt-row" data-cat="' + k + '" data-name="' + esc((p.name||"").toLowerCase()) + '" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">' +
+        '<div style="flex:1;min-width:0;font-size:14px;">' + esc(p.name) + '<div class="cnt-sys" data-pid="' + pid + '" style="font-size:11.5px;color:var(--text-2);">Sistema: ' + fmtQty(sys) + ' ' + esc(p.unit||"un") + (p.cost ? ' · ' + fmtMoney(p.cost) + '/' + esc(p.unit||"un") : ' · <span style="color:var(--amber)">sem custo</span>') + '</div></div>' +
+        '<input type="number" inputmode="decimal" min="0" step="any" class="cntQty" data-cat="' + k + '" data-pid="' + pid + '" value="' + sys + '" style="width:80px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:15px;text-align:right;">' +
       '</div>';
     });
+    html += '</div>';
   });
   html += '<div style="position:sticky;bottom:0;background:var(--surface);padding-top:12px;">' +
-    '<button class="btn btn-primary" id="bCntSave">Salvar contagem</button>' +
-    '<button class="btn btn-secondary" id="bCancel">Cancelar</button></div>';
+    '<button class="btn btn-primary" id="bCntSave">✓ Finalizar contagem completa</button>' +
+    '<button class="btn btn-secondary" id="bCancel">Fechar</button></div>';
   openSheet(html);
-  document.getElementById("bCancel").addEventListener("click", closeSheet);
-  document.getElementById("cntSearch").addEventListener("input", function(e){
-    var t = e.target.value.toLowerCase();
-    sheet.querySelectorAll(".cnt-row").forEach(function(r){ r.style.display = r.getAttribute("data-name").indexOf(t)!==-1 ? "flex" : "none"; });
-    sheet.querySelectorAll(".cnt-cat").forEach(function(h){ h.style.display = t ? "none" : ""; });
+  document.getElementById("bCancel").addEventListener("click", function(){
+    var dirty = [].some.call(sheet.querySelectorAll(".cntQty"), function(i){ return i.dataset.dirty === "1"; });
+    if (dirty && !window.confirm("Há quantidades digitadas que ainda não foram salvas. Fechar mesmo assim?")) return;
+    closeSheet();
   });
+  sheet.querySelectorAll(".cntQty").forEach(function(inp){
+    inp.addEventListener("input", function(){
+      inp.dataset.dirty = "1"; inp.style.borderColor = "var(--accent)";
+      var st = sheet.querySelector('.cnt-status[data-st="' + inp.getAttribute("data-cat") + '"]');
+      if (st) { st.textContent = "alterações não salvas"; st.style.color = "var(--amber)"; }
+    });
+  });
+  function applyFilters() {
+    var t = (document.getElementById("cntSearch").value || "").toLowerCase();
+    sheet.querySelectorAll(".cnt-sec").forEach(function(sec){
+      var k = sec.getAttribute("data-sec");
+      var showSec = !countCatFilter || countCatFilter === k, any = false;
+      sec.querySelectorAll(".cnt-row").forEach(function(r){ var ok = !t || r.getAttribute("data-name").indexOf(t) !== -1; r.style.display = ok ? "flex" : "none"; if (ok) any = true; });
+      sec.style.display = showSec && any ? "" : "none";
+    });
+  }
+  sheet.querySelectorAll("[data-ccat]").forEach(function(ch){
+    ch.addEventListener("click", function(){
+      countCatFilter = ch.getAttribute("data-ccat");
+      sheet.querySelectorAll("[data-ccat]").forEach(function(x){ x.classList.toggle("selected", x === ch); });
+      applyFilters();
+      sheet.scrollTop = 0;
+    });
+  });
+  document.getElementById("cntSearch").addEventListener("input", applyFilters);
+  sheet.querySelectorAll("[data-save]").forEach(function(b){ b.addEventListener("click", function(){ saveCountCategory(b.getAttribute("data-save"), b); }); });
   document.getElementById("bCntSave").addEventListener("click", submitCount);
+}
+// Salva só um gênero: ajusta o estoque desses itens e registra uma contagem parcial (não entra no CMV geral)
+function saveCountCategory(catKey, btn) {
+  var date = document.getElementById("cntDate").value;
+  if (!date) { showToast("Informe a data da contagem"); return; }
+  var rows = [].slice.call(sheet.querySelectorAll('.cntQty[data-cat="' + catKey + '"]'));
+  var items = [], diffs = [], total = 0;
+  rows.forEach(function(inp){
+    var pid = inp.getAttribute("data-pid"), p = products[pid]; if (!p) return;
+    var q = parseFloat(inp.value); if (isNaN(q) || q < 0) q = 0;
+    var sys = scopedStock[pid] ? scopedStock[pid].quantity : 0;
+    var cost = p.cost || 0; total += q * cost;
+    if (q > 0) items.push({productId:pid, productName:p.name, qty:q, unitCost:cost, value:q*cost});
+    if (Math.abs(q - sys) > 1e-9) diffs.push({pid:pid, name:p.name, sys:sys, q:q});
+  });
+  btn.disabled = true; var old = btn.textContent; btn.textContent = "Salvando…";
+  var storeName = stores[currentStoreId].name;
+  var catName = catKey === "_none" ? "Sem gênero" : categories[catKey].name;
+  var chain = db.collection("counts").add({
+    storeId: currentStoreId, storeName: storeName, date: date, partial: true, categoryId: catKey, categoryName: catName,
+    items: items, totalValue: total, adjustments: diffs.length,
+    employeeId: currentEmployeeId, employeeName: currentEmployeeName, createdAt: Date.now()
+  });
+  diffs.forEach(function(d){
+    chain = chain.then(function(){
+      return db.doc("stock/"+currentStoreId+"_"+d.pid).set({storeId:currentStoreId, productId:d.pid, quantity:d.q, updatedAt:Date.now()})
+        .then(function(){
+          scopedStock[d.pid] = {storeId:currentStoreId, productId:d.pid, quantity:d.q, updatedAt:Date.now()};
+          return db.collection("movements").add({storeId:currentStoreId, storeName:storeName, productId:d.pid, productName:d.name,
+            type: d.q > d.sys ? "entrada" : "saida", quantity: Math.abs(d.q - d.sys),
+            employeeId:currentEmployeeId, employeeName:currentEmployeeName, note:"Contagem parcial (" + catName + ") " + fmtDateShort(date), timestamp:Date.now()});
+        });
+    });
+  });
+  chain.then(function(){
+    rows.forEach(function(inp){
+      inp.dataset.dirty = ""; inp.style.borderColor = "var(--border)";
+      var pid = inp.getAttribute("data-pid"), p = products[pid];
+      var s = sheet.querySelector('.cnt-sys[data-pid="' + pid + '"]');
+      if (s && p) s.innerHTML = 'Sistema: ' + fmtQty(parseFloat(inp.value) || 0) + ' ' + esc(p.unit||"un") + (p.cost ? ' · ' + fmtMoney(p.cost) + '/' + esc(p.unit||"un") : ' · <span style="color:var(--amber)">sem custo</span>');
+    });
+    var st = sheet.querySelector('.cnt-status[data-st="' + catKey + '"]');
+    if (st) { st.textContent = "✓ salvo às " + nowTimeStr() + (diffs.length ? " · " + diffs.length + " ajuste(s)" : " · sem diferenças"); st.style.color = "var(--green)"; }
+    btn.disabled = false; btn.textContent = "✓ Salvo — salvar de novo";
+    showToast(catName + " salvo" + (diffs.length ? " · " + diffs.length + " ajuste(s)" : ""));
+  }).catch(function(err){
+    btn.disabled = false; btn.textContent = old;
+    showToast("Erro ao salvar " + catName + ": " + errMsg(err));
+  });
 }
 function submitCount() {
   var date = document.getElementById("cntDate").value;
@@ -994,7 +1083,7 @@ function submitCount() {
     showToast("Contagem salva: " + fmtMoney(total) + (diffs.length ? " · " + diffs.length + " ajuste(s)" : ""));
     if (noCost) setTimeout(function(){ showToast(noCost + " produto(s) contado(s) sem custo cadastrado — valor não entra no CMV"); }, 2500);
   }).catch(function(err){
-    showToast("Erro ao salvar contagem: " + errMsg(err)); btn.disabled = false; btn.textContent = "Salvar contagem";
+    showToast("Erro ao salvar contagem: " + errMsg(err)); btn.disabled = false; btn.textContent = "✓ Finalizar contagem completa";
   });
 }
 
@@ -1100,6 +1189,7 @@ function renderProdutos() {
     '<input id="searchInput" type="text" placeholder="Buscar produto..." value="' + esc(searchTerm) + '"></div>';
   html += '<button class="btn btn-secondary" id="bPrecos" style="margin-bottom:10px;">💲 Atualizar preços de produtos</button>';
   html += '<button class="link-btn" id="bCats">⚙ Gerenciar gêneros/categorias</button> &nbsp; <button class="link-btn" id="bImportP">⬇️ Importar catálogo padrão</button>';
+  if (currentRole() === "Diretoria") html += ' &nbsp; <button class="link-btn" id="bProdHist">🕘 Histórico de alterações</button>';
   if (list.length === 0) {
     html += '<div class="empty-state"><div class="emoji">🏷️</div>Nenhum produto cadastrado.</div>';
   } else {
@@ -1115,6 +1205,7 @@ function renderProdutos() {
   content.innerHTML = html;
   document.getElementById("bAdd").addEventListener("click", function(){ openProductForm(null); });
   document.getElementById("bCats").addEventListener("click", openCategoryManager);
+  var bph = document.getElementById("bProdHist"); if (bph) bph.addEventListener("click", function(){ openProductHistory(null); });
   document.getElementById("bPrecos").addEventListener("click", function(){ navigate("precos"); });
   document.getElementById("bImportP").addEventListener("click", function(){ importDefaults(true); });
   var si = document.getElementById("searchInput");
@@ -1148,7 +1239,7 @@ function weightLabel(p) {
 }
 function openProductForm(id) {
   var p = id ? products[id] : null;
-  var readOnly = !!p && !canEditDelete();
+  var readOnly = !!p && currentRole() !== "Diretoria";
   var dis = readOnly ? "disabled" : "";
   var curType = p ? (p.unit || "un") : "un";
   var typeOpts = PRODUCT_TYPES.map(function(t){ return '<option value="'+t.v+'"'+(curType===t.v?" selected":"")+'>'+t.l+'</option>'; }).join("");
@@ -1156,7 +1247,8 @@ function openProductForm(id) {
   if (PRODUCT_TYPES.every(function(t){ return t.v!==curType; })) typeOpts += '<option value="'+esc(curType)+'" selected>'+esc(curType)+' (antigo)</option>';
   var wu = p && p.weightUnit ? p.weightUnit : "g";
   var html = '<h2>' + (p?"Editar produto":"Novo produto") + '</h2>' +
-    (readOnly ? '<div class="sub" style="color:var(--amber);">Apenas a Diretoria pode editar ou excluir cadastros.</div>' : '') +
+    (readOnly ? '<div class="sub" style="color:var(--amber);">🔒 Somente a Diretoria pode alterar ou excluir produtos (com senha e motivo).</div>' : '') +
+    (p && !readOnly ? '<div class="sub" style="color:var(--text-2);">🔒 Alterações e exclusões pedem sua senha e o motivo, e ficam registradas no histórico.</div>' : '') +
     '<div class="field"><label>Produto*</label><input type="text" id="pName" placeholder="Ex: Costela" value="' + (p?esc(p.name):"") + '" ' + dis + '></div>' +
     '<div class="row2">' +
       '<div class="field"><label>Peso do produto</label><div style="display:flex;gap:6px;">' +
@@ -1172,10 +1264,13 @@ function openProductForm(id) {
       '<div class="field"><label>Código (opcional)</label><input type="text" id="pSku" value="' + (p?esc(p.sku||""):"") + '" ' + dis + '></div></div>' +
       '<div class="checkbox-row"><input type="checkbox" id="pPer" ' + (p&&p.perishable?"checked":"") + ' ' + dis + '><label for="pPer">Produto perecível (controla validade/lote)</label></div>' +
     '</details>' +
-    (readOnly ? '' : '<button class="btn btn-primary" id="bSave">Salvar</button>' + (p?'<button class="btn btn-secondary" id="bDel">Excluir produto</button>':'')) +
+    '<div id="pAuth"></div>' +
+    (readOnly ? '' : '<button class="btn btn-primary" id="bSave">Salvar</button>' + (p?'<button class="btn btn-secondary" id="bDel" style="color:var(--red);">Excluir produto</button>':'')) +
+    (p && currentRole() === "Diretoria" ? '<button class="link-btn" id="bPHist" style="display:block;margin:4px auto 8px;">🕘 Ver histórico deste produto</button>' : '') +
     '<button class="btn btn-secondary" id="bCancel">' + (readOnly?"Fechar":"Cancelar") + '</button>';
   openSheet(html);
   document.getElementById("bCancel").addEventListener("click", closeSheet);
+  var bphi = document.getElementById("bPHist"); if (bphi) bphi.addEventListener("click", function(){ openProductHistory(id); });
   if (readOnly) return;
   document.getElementById("pUnit").addEventListener("change", function(e){
     document.getElementById("pCostLabel").textContent = "Custo do produto (R$ por " + typeLabel(e.target.value).toLowerCase() + ")*";
@@ -1184,7 +1279,8 @@ function openProductForm(id) {
     var name = document.getElementById("pName").value.trim();
     if (!name) { showToast("Informe o nome do produto"); return; }
     var costStr = document.getElementById("pCost").value;
-    if (costStr === "") { showToast("Informe o custo do produto"); return; }
+    if (costStr === "" && !p) { showToast("Informe o custo do produto"); return; }
+    if (costStr === "") costStr = String(p.cost || 0);
     var data = {
       name: name,
       weight: parseFloat(document.getElementById("pWeight").value) || 0,
@@ -1196,18 +1292,116 @@ function openProductForm(id) {
       minStock: parseFloat(document.getElementById("pMin").value) || 0,
       perishable: document.getElementById("pPer").checked
     };
-    var btn = document.getElementById("bSave"); btn.disabled = true; btn.textContent = "Salvando…";
-    var promise = p ? db.doc("products/"+id).update(data) : db.collection("products").add(Object.assign({createdAt:Date.now()}, data));
-    promise.then(function(){ closeSheet(); showToast("Produto salvo"); networkCmvCache = {}; })
-      .catch(function(err){ showToast("Erro ao salvar: " + errMsg(err)); btn.disabled=false; btn.textContent="Salvar"; });
+    var btn = document.getElementById("bSave");
+    if (!p) {
+      btn.disabled = true; btn.textContent = "Salvando…";
+      db.collection("products").add(Object.assign({createdAt:Date.now()}, data))
+        .then(function(){ closeSheet(); showToast("Produto salvo"); networkCmvCache = {}; })
+        .catch(function(err){ showToast("Erro ao salvar: " + errMsg(err)); btn.disabled=false; btn.textContent="Salvar"; });
+      return;
+    }
+    var changes = productChanges(p, data);
+    if (!changes.length) { closeSheet(); showToast("Nenhuma alteração"); return; }
+    confirmProductChange("edicao", p, changes, function(){
+      return db.doc("products/"+id).update(data).then(function(){ networkCmvCache = {}; return "Produto alterado e registrado no histórico"; });
+    });
   });
   if (p) {
     document.getElementById("bDel").addEventListener("click", function () {
-      if (!window.confirm("Excluir o produto " + p.name + "?")) return;
-      db.doc("products/"+id).delete().then(function(){ closeSheet(); showToast("Produto excluído"); })
-        .catch(function(){ showToast("Erro ao excluir"); });
+      confirmProductChange("exclusao", p, [], function(){
+        return db.doc("products/"+id).delete().then(function(){ return "Produto excluído e registrado no histórico"; });
+      });
     });
   }
+}
+
+// ---------- Alteração/exclusão de produto: senha da Diretoria + motivo + histórico ----------
+var PRODUCT_FIELD_LABELS = {name:"Nome", weight:"Peso", weightUnit:"Unidade do peso", unit:"Tipo", cost:"Custo", categoryId:"Gênero", sku:"Código", minStock:"Estoque mínimo", perishable:"Perecível"};
+function productFieldText(f, v) {
+  if (f === "categoryId") return v && categories[v] ? categories[v].name : "Sem gênero";
+  if (f === "unit") return typeLabel(v);
+  if (f === "cost") return fmtMoney(v || 0);
+  if (f === "perishable") return v ? "Sim" : "Não";
+  if (v === null || v === undefined || v === "") return "—";
+  return String(v);
+}
+function productChanges(p, data) {
+  var out = [];
+  Object.keys(PRODUCT_FIELD_LABELS).forEach(function(f){
+    var a = p[f], b = data[f];
+    if (f === "weight" || f === "cost" || f === "minStock") { a = parseFloat(a) || 0; b = parseFloat(b) || 0; }
+    else if (f === "perishable") { a = !!a; b = !!b; }
+    else { a = (a === undefined || a === null) ? "" : a; b = (b === undefined || b === null) ? "" : b; }
+    if (f === "weightUnit" && !(parseFloat(data.weight) > 0) && !(parseFloat(p.weight) > 0)) return;
+    if (a !== b) out.push({field:f, label:PRODUCT_FIELD_LABELS[f], from:productFieldText(f, p[f]), to:productFieldText(f, data[f])});
+  });
+  return out;
+}
+function confirmProductChange(action, p, changes, doIt) {
+  if (currentRole() !== "Diretoria") { showToast("Somente a Diretoria pode alterar ou excluir produtos"); return; }
+  var box = document.getElementById("pAuth"); if (!box) return;
+  var isDel = action === "exclusao";
+  box.innerHTML = '<div class="item-row" style="border-color:' + (isDel ? 'var(--red)' : 'var(--amber)') + ';margin-bottom:12px;">' +
+    '<div style="font-weight:800;font-size:14px;margin-bottom:6px;">🔒 ' + (isDel ? 'Confirmar exclusão de "' + esc(p.name) + '"' : 'Confirmar alteração') + '</div>' +
+    (changes.length ? '<div style="font-size:12.5px;margin-bottom:8px;">' + changes.map(function(ch){
+      return '<div><b>' + esc(ch.label) + ':</b> ' + esc(ch.from) + ' → <b>' + esc(ch.to) + '</b></div>'; }).join("") + '</div>' : '') +
+    '<div class="field" style="margin-bottom:8px;"><label>Motivo da ' + (isDel ? 'exclusão' : 'alteração') + '*</label><input type="text" id="paReason" placeholder="Ex: nome digitado errado, produto descontinuado..."></div>' +
+    '<div class="field" style="margin-bottom:8px;"><label>Sua senha*</label><input type="password" id="paPw" autocomplete="current-password"></div>' +
+    '<button class="btn ' + (isDel ? 'btn-saida' : 'btn-primary') + '" id="paOk" type="button">' + (isDel ? 'Excluir produto' : 'Confirmar alteração') + '</button>' +
+    '<button class="btn btn-secondary" id="paCancel" type="button" style="margin-bottom:0;">Voltar</button></div>';
+  ["bSave","bDel"].forEach(function(b){ var el = document.getElementById(b); if (el) el.style.display = "none"; });
+  box.scrollIntoView({block:"nearest"});
+  setTimeout(function(){ var r = document.getElementById("paReason"); if (r) r.focus(); }, 50);
+  document.getElementById("paCancel").addEventListener("click", function(){
+    box.innerHTML = "";
+    ["bSave","bDel"].forEach(function(b){ var el = document.getElementById(b); if (el) el.style.display = ""; });
+  });
+  document.getElementById("paOk").addEventListener("click", function(){
+    var reason = document.getElementById("paReason").value.trim();
+    var pw = document.getElementById("paPw").value;
+    if (reason.length < 3) { showToast("Informe o motivo"); return; }
+    if (!pw) { showToast("Digite sua senha"); return; }
+    var me = employees[currentEmployeeId] || {};
+    if (!me.login) { showToast("Seu usuário não tem login vinculado"); return; }
+    var ok = document.getElementById("paOk"); ok.disabled = true; ok.textContent = "Verificando…";
+    SB.auth.signIn(me.login, pw).then(function(){
+      var u = SB.auth.user() || {};
+      return db.collection("product_history").add({
+        productId: p.id, productName: p.name, action: action, reason: reason, changes: changes,
+        before: Object.assign({}, p, {id: undefined}),
+        byId: currentEmployeeId, byName: currentEmployeeName, byAuth: u.id || null, at: Date.now()
+      });
+    }).then(function(){ return doIt(); })
+      .then(function(msg){ closeSheet(); showToast(msg); })
+      .catch(function(err){
+        ok.disabled = false; ok.textContent = isDel ? "Excluir produto" : "Confirmar alteração";
+        showToast(err && err.code === "auth_failed" ? "Senha incorreta" : "Erro: " + errMsg(err));
+      });
+  });
+}
+function openProductHistory(productId) {
+  openSheet('<h2>🕘 Histórico de alterações' + (productId && products[productId] ? ' — ' + esc(products[productId].name) : ' de produtos') + '</h2><div class="loading-msg">Carregando…</div>');
+  var q = db.collection("product_history");
+  if (productId) q = q.where("productId", "==", productId);
+  q.orderBy("at", "desc").limit(200).get().then(function(qs){
+    var rows = qs.docs.map(function(d){ return d.data(); });
+    var html = '<h2>🕘 Histórico de alterações' + (productId && products[productId] ? ' — ' + esc(products[productId].name) : ' de produtos') + '</h2>' +
+      '<div class="sub">Alterações e exclusões feitas pela Diretoria, com o motivo informado.</div>';
+    if (!rows.length) html += '<div class="empty-state" style="padding:24px 10px;">Nenhuma alteração registrada.</div>';
+    rows.forEach(function(h){
+      var del = h.action === "exclusao";
+      html += '<div class="item-row" style="' + (del ? 'border-color:var(--red);' : '') + '">' +
+        '<div style="display:flex;justify-content:space-between;gap:8px;"><b>' + esc(h.productName) + '</b>' +
+        '<span class="pill" style="' + (del ? 'background:var(--red-bg);color:var(--red);' : 'background:var(--amber-bg);color:var(--amber);') + '">' + (del ? 'Excluído' : 'Alterado') + '</span></div>' +
+        (h.changes && h.changes.length ? '<div style="font-size:12.5px;margin-top:4px;">' + h.changes.map(function(ch){
+          return '<div>' + esc(ch.label) + ': ' + esc(ch.from) + ' → <b>' + esc(ch.to) + '</b></div>'; }).join("") + '</div>' : '') +
+        '<div style="font-size:12.5px;margin-top:4px;">Motivo: <i>' + esc(h.reason) + '</i></div>' +
+        '<div style="font-size:11.5px;color:var(--text-2);margin-top:2px;">' + fmtDate(h.at) + ' · ' + esc(h.byName || "") + '</div></div>';
+    });
+    html += '<button class="btn btn-secondary" id="bClose" style="margin-top:8px;">Fechar</button>';
+    openSheet(html);
+    document.getElementById("bClose").addEventListener("click", closeSheet);
+  }).catch(function(err){ showToast("Erro ao carregar histórico: " + errMsg(err)); });
 }
 function fmtQtyRaw(n) { return (n===undefined||n===null) ? "0" : String(n); }
 
@@ -1554,13 +1748,27 @@ function orderStatusBadge(o) {
   return '<span class="badge-low status-pendente">Pendente</span>';
 }
 var REFUSE_REASONS = ["Falta de mercadoria", "Sem necessidade de envio"];
+// Itens que ficaram faltando: pedido − recebido (ou pedido − entregue, enquanto a loja não confirmou)
+function orderPendingList(o) {
+  if (!o || !o.fulfillment) return [];
+  if (o.pendingItems) return o.pendingItems;
+  return o.fulfillment.map(function(f){
+    var pend = f.status === "recusado" ? f.qtyOrdered : Math.max(0, (f.qtyOrdered||0) - (f.qtySent||0));
+    return {productId:f.productId, productName:f.productName, unit:f.unit, qtyOrdered:f.qtyOrdered, qtySent:f.qtySent||0, qtyReceived:null, pending:pend, reason: f.status === "recusado" ? (f.reason || "Recusado") : "Entrega parcial"};
+  }).filter(function(x){ return x.pending > 0; });
+}
+function pendingBadge(o) {
+  if (o.status === "cancelado" || o.status === "pendente") return "";
+  var n = orderPendingList(o).length;
+  return n ? ' <span class="badge-low" style="color:var(--amber);background:var(--amber-bg);">⚠ ' + n + ' item' + (n===1?'':'s') + ' pendente' + (n===1?'':'s') + '</span>' : '';
+}
 function orderRowHtml(o) {
   return '<div class="card" data-order="' + o.id + '"><div class="info">' +
     '<div class="name">' + orderLabel(o) + '</div>' +
     '<div class="meta">' + esc(o.storeName) + ' → ' + esc(o.targetName) + '</div>' +
     '<div class="meta">Pedido ' + fmtDateShort(o.orderDate) + ' às ' + esc(o.orderTime) +
       ' · Entrega ' + (o.deliveryDate ? fmtDateShort(o.deliveryDate) : "—") + (o.deliveryTime ? ' às ' + esc(o.deliveryTime) : '') + '</div>' +
-    orderStatusBadge(o) + '</div></div>';
+    orderStatusBadge(o) + pendingBadge(o) + '</div></div>';
 }
 
 // Número sequencial do dia, compartilhado por toda a rede (001, 002, ...), protegido contra duplicidade.
@@ -1762,11 +1970,14 @@ function openOrderDetail(id) {
     var right = 'Pedido: <b>' + fmtQty(it.qty) + ' ' + esc(it.unit) + '</b>';
     if (f) {
       if (f.status === "recusado") right += '<br><span style="color:var(--red);font-weight:700;">Recusado</span><br><span style="font-size:12px;color:var(--text-2)">' + esc(f.reason||"") + '</span>';
-      else right += '<br>Enviado: <b style="color:' + (f.qtySent < it.qty ? 'var(--amber)' : 'var(--green)') + ';">' + fmtQty(f.qtySent) + '</b>' + (f.qtySent < it.qty ? ' <span style="font-size:12px;color:var(--amber)">(parcial)</span>' : '');
+      else right += '<br>Entregue: <b style="color:' + (f.qtySent < it.qty ? 'var(--amber)' : 'var(--green)') + ';">' + fmtQty(f.qtySent) + '</b>';
     } else {
       right += '<br><span style="font-size:12px;color:var(--text-2)">Estoque na hora: ' + fmtQty(it.stockAtOrder) + '</span>';
     }
-    html += '<div class="item-row" style="display:flex;justify-content:space-between;gap:8px;"><div>' + esc(it.productName) + '</div>' +
+    var pi = orderPendingList(o).filter(function(x){ return x.productId === it.productId; })[0];
+    if (pi && pi.qtyReceived !== null && pi.qtyReceived !== undefined) right += '<br>Recebido: <b>' + fmtQty(pi.qtyReceived) + '</b>';
+    if (pi) right += '<br><span class="pend-txt">⚠ Pendente: ' + fmtQty(pi.pending) + ' ' + esc(it.unit) + '</span>';
+    html += '<div class="item-row' + (pi ? ' pend-row' : '') + '" style="display:flex;justify-content:space-between;gap:8px;"><div>' + esc(it.productName) + '</div>' +
       '<div style="text-align:right;white-space:nowrap;">' + right + '</div></div>';
   });
   if (o.notes) html += '<div class="sub">Obs.: ' + esc(o.notes) + '</div>';
@@ -1798,20 +2009,16 @@ function openOrderDetail(id) {
 var fulfillDraft = [];
 function openFulfillOrderForm(o) {
   if (!requireRole(["Operador de Estoque","Diretoria"])) return;
-  fulfillDraft = o.items.map(function(it){
-    var avail = scopedStock[it.productId] ? scopedStock[it.productId].quantity : 0;
-    if (avail <= 0) return {qty:"0", status:"recusado", reason:REFUSE_REASONS[0]};
-    return {qty:String(Math.min(it.qty, avail)), status:"atendido", reason:""};
-  });
+  fulfillDraft = o.items.map(function(it){ return {qty:String(it.qty), status:"atendido", reason:""}; });
   var html = '<h2>Atender ' + orderLabel(o) + '</h2>' +
-    '<div class="sub">' + esc(o.storeName) + ' · entrega ' + fmtDateShort(o.deliveryDate) + ' às ' + esc(o.deliveryTime) + '</div>' +
+    '<div class="sub">' + esc(o.storeName) + ' · entrega ' + fmtDateShort(o.deliveryDate) + ' às ' + esc(o.deliveryTime) + '<br>Informe quanto está sendo <b>entregue</b> de cada item. O que faltar fica <span class="pend-txt">pendente</span> para a loja.</div>' +
     '<div style="display:flex;font-size:11.5px;font-weight:700;color:var(--text-2);text-transform:uppercase;padding:4px 0;border-bottom:1px solid var(--border);">' +
-      '<div style="flex:1;">Produto</div><div style="width:58px;text-align:center;">Pedido</div><div style="width:74px;text-align:center;">Enviado</div></div>' +
+      '<div style="flex:1;">Produto</div><div style="width:58px;text-align:center;">Pedido</div><div style="width:74px;text-align:center;">Entregue</div></div>' +
     '<div id="ffRows"></div>' +
     '<div id="ffSummary" style="font-size:12.5px;color:var(--text-2);margin:10px 0;"></div>' +
     '<div class="field"><label>Observação para a loja (opcional)</label><input type="text" id="ffNote"></div>' +
     '<div style="position:sticky;bottom:0;background:var(--surface);padding-top:8px;">' +
-    '<button class="btn btn-primary" id="bFfOk">Confirmar e enviar</button>' +
+    '<button class="btn btn-primary" id="bFfOk">✓ Confirmar entrega</button>' +
     '<button class="btn btn-secondary" id="bFfBack">Voltar</button></div>';
   openSheet(html);
   renderFulfillRows(o);
@@ -1829,13 +2036,15 @@ function renderFulfillRows(o) {
     var q = parseFloat(d.qty) || 0;
     var over = !refused && q > avail;
     var partial = !refused && q < it.qty;
-    html += '<div style="padding:10px 0;border-bottom:1px solid var(--border);' + (refused ? 'opacity:.75;' : '') + '">' +
+    var pend = refused ? it.qty : Math.max(0, it.qty - q);
+    html += '<div class="ffRow' + (pend > 0 ? ' pend-row' : '') + '" data-row="' + i + '" style="padding:10px 6px;border-bottom:1px solid var(--border);border-radius:8px;' + (refused ? 'opacity:.85;' : '') + '">' +
       '<div style="display:flex;align-items:center;">' +
         '<div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:600;' + (refused ? 'text-decoration:line-through;' : '') + '">' + esc(it.productName) + (p && weightLabel(p) ? ' <span style="font-weight:400;color:var(--text-2);font-size:12px;">' + weightLabel(p) + '</span>' : '') + '</div>' +
-          '<div style="font-size:11.5px;color:' + (over || avail < it.qty ? 'var(--red)' : 'var(--text-2)') + ';">Disponível no central: ' + fmtQty(avail) + ' ' + esc(it.unit) + '</div></div>' +
+          '<div style="font-size:11.5px;color:var(--text-2);">Saldo no sistema (central): ' + fmtQty(avail) + ' ' + esc(it.unit) + '</div>' +
+          '<div class="ffPend pend-txt" data-i="' + i + '" style="font-size:12px;">' + (pend > 0 ? '⚠ Pendente: ' + fmtQty(pend) + ' ' + esc(it.unit) : '') + '</div></div>' +
         '<div style="width:58px;text-align:center;font-weight:700;">' + fmtQty(it.qty) + '</div>' +
         '<div style="width:74px;"><input type="number" inputmode="decimal" min="0" step="any" class="ffQty" data-i="' + i + '" value="' + (refused ? "0" : esc(d.qty)) + '"' + (refused ? ' disabled' : '') +
-          ' style="width:100%;padding:8px;border-radius:8px;border:1px solid ' + (over ? 'var(--red)' : (partial ? 'var(--amber)' : 'var(--border)')) + ';background:var(--surface-2);color:var(--text);font-size:15px;text-align:right;"></div>' +
+          ' style="width:100%;padding:8px;border-radius:8px;border:1px solid ' + (partial ? 'var(--amber)' : 'var(--border)') + ';background:var(--surface-2);color:var(--text);font-size:15px;text-align:right;"></div>' +
       '</div>' +
       '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">' +
         '<button data-st="atendido" data-i="' + i + '" style="flex:1;padding:8px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;border:1px solid ' + (!refused ? 'var(--green)' : 'var(--border)') + ';background:' + (!refused ? 'var(--green-bg)' : 'var(--surface-2)') + ';color:' + (!refused ? 'var(--green)' : 'var(--text-2)') + ';">✓ Atendido' + (!refused && partial ? ' (parcial)' : '') + '</button>' +
@@ -1855,9 +2064,12 @@ function renderFulfillRows(o) {
       var it = o.items[i];
       var avail = scopedStock[it.productId] ? scopedStock[it.productId].quantity : 0;
       var q = parseFloat(inp.value) || 0;
-      inp.style.borderColor = q > avail ? "var(--red)" : (q < it.qty ? "var(--amber)" : "var(--border)");
+      inp.style.borderColor = q < it.qty ? "var(--amber)" : "var(--border)";
       var ab = box.querySelector('[data-st="atendido"][data-i="' + i + '"]');
       if (ab) ab.textContent = "✓ Atendido" + (q < it.qty ? " (parcial)" : "");
+      var pend = Math.max(0, it.qty - q);
+      var row = box.querySelector('.ffRow[data-row="' + i + '"]'); if (row) row.classList.toggle("pend-row", pend > 0);
+      var pe = box.querySelector('.ffPend[data-i="' + i + '"]'); if (pe) pe.textContent = pend > 0 ? "⚠ Pendente: " + fmtQty(pend) + " " + it.unit : "";
       updateFulfillSummary(o);
     });
   });
@@ -1892,7 +2104,7 @@ function updateFulfillSummary(o) {
     if (d.status === "recusado") rec++;
     else { at++; if ((parseFloat(d.qty)||0) < it.qty) par++; }
   });
-  el.innerHTML = '<b style="color:var(--green)">' + at + ' atendido(s)</b>' + (par ? ' (' + par + ' parcial)' : '') + ' · <b style="color:var(--red)">' + rec + ' recusado(s)</b>';
+  el.innerHTML = '<b style="color:var(--green)">' + at + ' atendido(s)</b>' + (par ? ' · <span class="pend-txt">' + par + ' com entrega parcial</span>' : '') + ' · <b style="color:var(--red)">' + rec + ' recusado(s)</b>';
 }
 function submitFulfill(o) {
   var results = [], toSend = [];
@@ -1904,8 +2116,7 @@ function submitFulfill(o) {
       continue;
     }
     var q = parseFloat(d.qty);
-    if (!(q > 0)) { showToast('"' + it.productName + '": informe a quantidade enviada ou marque Recusado'); return; }
-    if (q > avail) { showToast('"' + it.productName + '": só há ' + fmtQty(avail) + ' no estoque central'); return; }
+    if (!(q > 0)) { showToast('"' + it.productName + '": informe a quantidade entregue ou marque Recusado'); return; }
     results.push({productId:it.productId, productName:it.productName, unit:it.unit, qtyOrdered:it.qty, qtySent:q, status:"atendido", reason:""});
     toSend.push({productId:it.productId, productName:it.productName, unit:it.unit, qtySent:q, qtyOrdered:it.qty, qtyReceived:null,
       costAtSend: products[it.productId] ? (products[it.productId].cost||0) : 0});
@@ -1946,9 +2157,9 @@ function submitFulfill(o) {
     });
   }).then(function(){
     closeSheet();
-    showToast(toSend.length ? (orderLabel(o) + " enviado" + (partial ? " (parcial)" : "")) : (orderLabel(o) + " recusado"));
+    showToast(toSend.length ? ("Entrega confirmada" + (partial ? " — com itens pendentes" : "")) : (orderLabel(o) + " recusado"));
   }).catch(function(err){
-    showToast("Erro ao atender: " + errMsg(err)); btn.disabled = false; btn.textContent = "Confirmar e enviar";
+    showToast("Erro ao atender: " + errMsg(err)); btn.disabled = false; btn.textContent = "✓ Confirmar entrega";
   });
 }
 
@@ -2129,10 +2340,21 @@ function openReceiveShipmentPicker(pending, isCentral) {
 function openReceiveShipmentForm(shipmentId) {
   var s = scopedShipmentsDest.filter(function(x){return x.id===shipmentId;})[0];
   if (!s) { closeSheet(); return; }
-  var html = '<h2>Conferir mercadoria</h2><div class="sub">' + shipmentKindLabel(s) + ' de: ' + esc(s.originStoreName) + ' · ' + fmtDate(s.sentAt) + '</div>';
+  var ord = s.orderId ? findOrder(s.orderId) : null;
+  var html = '<h2>Conferir mercadoria</h2><div class="sub">' + shipmentKindLabel(s) + ' de: ' + esc(s.originStoreName) + ' · ' + fmtDate(s.sentAt) + (s.orderLabel ? ' · ' + esc(s.orderLabel) : '') + '<br>Confira e informe quanto chegou de cada item.</div>';
   s.items.forEach(function(it, idx){
-    html += '<div class="row2" style="align-items:flex-end;"><div class="field" style="flex:2;"><label>' + esc(it.productName) + ' (enviado: ' + fmtQty(it.qtySent) + ' ' + esc(it.unit) + ')</label>' +
-      '<input type="number" inputmode="decimal" class="recvQty" data-idx="' + idx + '" value="' + it.qtySent + '" min="0" step="any"></div></div>';
+    var ordered = it.qtyOrdered || it.qtySent;
+    var short = Math.max(0, ordered - it.qtySent);
+    html += '<div class="item-row recvRow' + (short > 0 ? ' pend-row' : '') + '" data-ridx="' + idx + '" style="display:flex;align-items:center;gap:10px;">' +
+      '<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:14px;">' + esc(it.productName) + '</div>' +
+      '<div style="font-size:12px;color:var(--text-2);">' + (it.qtyOrdered ? 'Pedido: ' + fmtQty(it.qtyOrdered) + ' · ' : '') + 'Entregue: <b>' + fmtQty(it.qtySent) + '</b> ' + esc(it.unit) + '</div>' +
+      '<div class="recvPend pend-txt" data-ridx="' + idx + '" style="font-size:12px;">' + (short > 0 ? '⚠ Pendente: ' + fmtQty(short) + ' ' + esc(it.unit) : '') + '</div></div>' +
+      '<div style="width:84px;"><label style="font-size:11px;color:var(--text-2);font-weight:600;">Recebido</label><input type="number" inputmode="decimal" class="recvQty" data-idx="' + idx + '" value="' + it.qtySent + '" min="0" step="any" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:15px;text-align:right;"></div></div>';
+  });
+  if (ord && ord.fulfillment) ord.fulfillment.forEach(function(f){
+    if (f.status !== "recusado") return;
+    html += '<div class="item-row pend-row"><div style="font-weight:600;font-size:14px;">' + esc(f.productName) + '</div>' +
+      '<div style="font-size:12px;">Pedido: ' + fmtQty(f.qtyOrdered) + ' ' + esc(f.unit) + ' · <span class="pend-txt">⚠ Não entregue (' + esc(f.reason || "recusado") + ')</span></div></div>';
   });
   html += '<div class="field"><label>Observação (opcional)</label><input type="text" id="recvNote" placeholder="Ex: caixa amassada, item faltando..."></div>' +
     '<button class="btn btn-primary" id="bConfirmRecv">Confirmar recebimento</button>' +
@@ -2140,6 +2362,15 @@ function openReceiveShipmentForm(shipmentId) {
   openSheet(html);
   document.getElementById("bCancel").addEventListener("click", closeSheet);
   document.getElementById("bConfirmRecv").addEventListener("click", function(){ submitReceiveShipment(s); });
+  sheet.querySelectorAll(".recvQty").forEach(function(inp){
+    inp.addEventListener("input", function(){
+      var idx = parseInt(inp.getAttribute("data-idx"), 10), it = s.items[idx];
+      var ordered = it.qtyOrdered || it.qtySent, q = parseFloat(inp.value) || 0;
+      var pend = Math.max(0, ordered - q);
+      var row = sheet.querySelector('.recvRow[data-ridx="' + idx + '"]'); if (row) row.classList.toggle("pend-row", pend > 0);
+      var pe = sheet.querySelector('.recvPend[data-ridx="' + idx + '"]'); if (pe) pe.textContent = pend > 0 ? "⚠ Pendente: " + fmtQty(pend) + " " + it.unit : "";
+    });
+  });
 }
 function submitReceiveShipment(s) {
   var btn = document.getElementById("bConfirmRecv"); btn.disabled=true; btn.textContent="Salvando…";
@@ -2176,8 +2407,31 @@ function submitReceiveShipment(s) {
       receivedBy: currentEmployeeId, receivedByName: currentEmployeeName, receivedAt: Date.now(), receiveNotes: note
     });
   }).then(function(){
-    if (s.orderId) return db.doc("orders/"+s.orderId).update({status:"recebido", receivedAt: Date.now(), receivedByName: currentEmployeeName}).catch(function(){});
-  }).then(function(){ closeSheet(); showToast(hasDivergence ? "Recebido com divergência registrada" : "Mercadoria recebida"); })
+    var ord = s.orderId ? findOrder(s.orderId) : null;
+    var pending = [];
+    receivedItems.forEach(function(it){
+      var ordered = it.qtyOrdered || it.qtySent;
+      var pend = Math.max(0, ordered - it.qtyReceived);
+      if (pend > 0) pending.push({productId:it.productId, productName:it.productName, unit:it.unit, qtyOrdered:ordered, qtySent:it.qtySent, qtyReceived:it.qtyReceived, pending:pend,
+        reason: it.qtySent < ordered ? "Entrega parcial do estoque" + (it.qtyReceived < it.qtySent ? " e falta no recebimento" : "") : "Faltou no recebimento"});
+    });
+    if (ord && ord.fulfillment) ord.fulfillment.forEach(function(f){
+      if (f.status === "recusado") pending.push({productId:f.productId, productName:f.productName, unit:f.unit, qtyOrdered:f.qtyOrdered, qtySent:0, qtyReceived:0, pending:f.qtyOrdered, reason:"Não entregue (" + (f.reason || "recusado") + ")"});
+    });
+    s._pending = pending;
+    if (s.orderId) return db.doc("orders/"+s.orderId).update({status:"recebido", receivedAt: Date.now(), receivedByName: currentEmployeeName, pendingItems: pending, hasPending: pending.length > 0}).catch(function(){});
+  }).then(function(){
+    var pending = s._pending || [];
+    if (!pending.length) { closeSheet(); showToast(hasDivergence ? "Recebido com divergência registrada" : "Mercadoria recebida — nada pendente"); return; }
+    var h = '<h2>✓ Recebimento confirmado</h2><div class="sub">Os itens abaixo ficaram <span class="pend-txt">pendentes</span>' + (s.orderLabel ? ' no ' + esc(s.orderLabel) : '') + ':</div>';
+    pending.forEach(function(x){
+      h += '<div class="item-row pend-row"><div style="display:flex;justify-content:space-between;gap:8px;"><b>' + esc(x.productName) + '</b><span class="pend-txt">⚠ Falta ' + fmtQty(x.pending) + ' ' + esc(x.unit) + '</span></div>' +
+        '<div style="font-size:12px;color:var(--text-2);margin-top:2px;">Pedido ' + fmtQty(x.qtyOrdered) + ' · Entregue ' + fmtQty(x.qtySent) + ' · Recebido ' + fmtQty(x.qtyReceived) + ' — ' + esc(x.reason) + '</div></div>';
+    });
+    h += '<button class="btn btn-primary" id="bPendOk" style="margin-top:6px;">Entendi</button>';
+    openSheet(h);
+    document.getElementById("bPendOk").addEventListener("click", closeSheet);
+  })
     .catch(function(){ showToast("Erro ao confirmar recebimento"); btn.disabled=false; btn.textContent="Confirmar recebimento"; });
 }
 
@@ -2497,7 +2751,7 @@ function fetchNetworkCmv(month) {
     var compras = 0;
     r[1].docs.forEach(function(d){ compras += d.data().totalCost||0; });
     var counts = r[2].docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
-      .filter(function(c){ return centralIds.indexOf(c.storeId) !== -1; })
+      .filter(function(c){ return centralIds.indexOf(c.storeId) !== -1 && !c.partial; })
       .sort(function(a,b){ return (a.date||"").localeCompare(b.date||"") || (a.createdAt||0)-(b.createdAt||0); });
     var ei = null, ef = null;
     counts.forEach(function(c){
