@@ -172,18 +172,32 @@
     return false;
   }
 
+  // Filtros de texto, número e verdadeiro/falso rodam no banco. A leitura vem em páginas de
+  // 1000 (limite por consulta do Supabase) até trazer tudo, para nunca cortar resultados.
+  var PAGE_SIZE = 1000;
   function fetchCollection(col, filters, order, limit) {
     var params = ["select=id,data", "collection=eq." + enc(col)];
     var clientFilters = [];
     (filters || []).forEach(function (f) {
-      if (typeof f[2] === "string" && OPS[f[1]]) params.push(enc("data->>" + f[0]) + "=" + OPS[f[1]] + "." + enc(f[2]));
+      var v = f[2];
+      if (!OPS[f[1]]) { clientFilters.push(f); return; }
+      if (typeof v === "string") params.push(enc("data->>" + f[0]) + "=" + OPS[f[1]] + "." + enc(v));
+      else if ((typeof v === "number" && isFinite(v)) || typeof v === "boolean") params.push(enc("data->" + f[0]) + "=" + OPS[f[1]] + "." + enc(JSON.stringify(v)));
       else clientFilters.push(f);
     });
-    if (order) params.push("order=" + enc("data->" + order.field) + "." + (order.dir === "desc" ? "desc" : "asc") + ".nullslast");
-    else params.push("order=id.asc");
-    if (limit && !clientFilters.length) params.push("limit=" + limit);
-    return rest("GET", "docs?" + params.join("&")).then(function (rows) {
-      rows = rows || [];
+    params.push("order=" + (order ? enc("data->" + order.field) + "." + (order.dir === "desc" ? "desc" : "asc") + ".nullslast," : "") + "id.asc");
+    var want = (limit && !clientFilters.length) ? limit : 0;
+    var all = [];
+    function page(offset) {
+      var n = want ? Math.min(PAGE_SIZE, want - all.length) : PAGE_SIZE;
+      return rest("GET", "docs?" + params.join("&") + "&limit=" + n + "&offset=" + offset).then(function (rows) {
+        rows = rows || [];
+        all = all.concat(rows);
+        if (rows.length < n || (want && all.length >= want)) return all;
+        return page(offset + rows.length);
+      });
+    }
+    return page(0).then(function (rows) {
       if (clientFilters.length) rows = rows.filter(function (r) { return clientFilters.every(function (f) { return testFilter(r.data, f); }); });
       if (limit && clientFilters.length) rows = rows.slice(0, limit);
       return mkQuerySnap(rows.map(function (r) { return mkDocSnap(r.id, freeze(r.data)); }));

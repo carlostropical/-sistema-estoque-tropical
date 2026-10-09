@@ -80,6 +80,36 @@
   .drawer .item-logout { color:var(--red); margin-top:14px; border-top:1px solid var(--border); padding-top:16px; }
   .pend-row { background:var(--amber-bg) !important; border-color:var(--amber) !important; }
   .pend-txt { color:var(--amber); font-weight:700; }
+  #printArea { display:none; position:fixed; inset:0; z-index:300; overflow:auto; background:#e9eaee;
+    --bg:#ffffff; --surface:#ffffff; --surface-2:#f3f4f6; --text:#111216; --text-2:#5b5f66; --border:#dcdee3;
+    --accent:#2f6fed; --accent-2:#e8f0ff; --green:#14814f; --green-bg:#e6f7ee; --red:#c53030; --red-bg:#fdeaea;
+    --amber:#9a6b00; --amber-bg:#fff4d6; --shadow:none; color:var(--text); }
+  body.printing #printArea { display:block; }
+  .pr-toolbar { position:sticky; top:0; z-index:2; display:flex; gap:8px; padding:10px 12px; background:#fff; border-bottom:1px solid #dcdee3; }
+  .pr-toolbar .btn { margin:0; }
+  .pr-page { background:#fff; max-width:820px; margin:14px auto; padding:22px 20px; border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,.12); font-size:13px; }
+  .pr-head { border-bottom:2px solid #111216; padding-bottom:10px; margin-bottom:14px; }
+  .pr-head .pr-brand { font-size:12px; font-weight:700; color:#5b5f66; letter-spacing:.03em; text-transform:uppercase; }
+  .pr-head h1 { font-size:20px; margin:4px 0 6px 0; }
+  .pr-head .pr-meta { font-size:12px; color:#5b5f66; line-height:1.5; }
+  .pr-table { width:100%; border-collapse:collapse; margin:6px 0 14px 0; font-size:12.5px; }
+  .pr-table th { text-align:left; background:#f3f4f6; padding:6px 8px; border-bottom:1px solid #dcdee3; font-size:11.5px; }
+  .pr-table td { padding:5px 8px; border-bottom:1px solid #eceef1; vertical-align:top; }
+  .pr-table .n { text-align:right; white-space:nowrap; }
+  .pr-table tr.pr-sub td { background:#fafafa; font-weight:700; }
+  .pr-table tr.pend-row td { background:#fff4d6; }
+  .pr-sec { font-size:14px; font-weight:800; margin:16px 0 4px 0; }
+  .pr-page .card { cursor:default; box-shadow:none; break-inside:avoid; }
+  .pr-page .item-row, .pr-page .stat-box { break-inside:avoid; }
+  @media print {
+    @page { margin:12mm; }
+    html, body { height:auto !important; background:#fff !important; }
+    body.printing > *:not(#printArea) { display:none !important; }
+    body.printing #printArea { position:static; overflow:visible; background:#fff; }
+    .pr-toolbar { display:none !important; }
+    .pr-page { box-shadow:none; margin:0; max-width:none; padding:0; border-radius:0; }
+    .pr-table tr { break-inside:avoid; }
+  }
   .drawer .brand { font-size:17px; font-weight:800; padding:0 18px 12px 18px; border-bottom:1px solid var(--border); margin-bottom:6px; }
 
   .searchbar { display:flex; align-items:center; background:var(--surface); border:1px solid var(--border);
@@ -276,6 +306,7 @@
 
 <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
 <div class="toast" id="toast"></div>
+<div id="printArea"></div>
 
 <script>
 (function () {
@@ -655,6 +686,36 @@ function productStoresLabel(p) {
   if (!p || !p.storeIds || !p.storeIds.length) return "";
   return p.storeIds.filter(function(s){ return stores[s]; }).map(function(s){ return stores[s].name; }).join(", ");
 }
+// ---------- RESUMO EM PDF ----------
+function openPrintPreview(title, metaLines, bodyHtml) {
+  var pa = document.getElementById("printArea");
+  var now = new Date();
+  var meta = (metaLines || []).filter(Boolean).concat(["Gerado em " + now.toLocaleDateString("pt-BR") + " às " + now.toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"}) + (currentEmployeeName ? " por " + currentEmployeeName : "")]);
+  pa.innerHTML = '<div class="pr-toolbar"><button class="btn btn-primary" id="prPrint" type="button">📄 Salvar PDF / Imprimir</button><button class="btn btn-secondary" id="prClose" type="button" style="width:auto;padding:13px 18px;">Fechar</button></div>' +
+    '<div class="pr-page"><div class="pr-head"><div class="pr-brand">Tropical Grill · Gestão Operacional</div><h1>' + esc(title) + '</h1>' +
+    '<div class="pr-meta">' + meta.map(esc).join("<br>") + '</div></div>' + bodyHtml + '</div>';
+  document.body.classList.add("printing");
+  pa.scrollTop = 0;
+  var oldTitle = document.title;
+  document.getElementById("prClose").addEventListener("click", function(){ document.body.classList.remove("printing"); pa.innerHTML = ""; document.title = oldTitle; });
+  document.getElementById("prPrint").addEventListener("click", function(){
+    document.title = title + " - " + now.toLocaleDateString("pt-BR").replace(/\//g, "-");
+    if (typeof window.print === "function") { try { window.print(); } catch (e) { showToast("Use o menu do navegador → Imprimir → Salvar como PDF"); } }
+    else showToast("Use o menu do navegador → Compartilhar → Imprimir/PDF");
+    setTimeout(function(){ document.title = oldTitle; }, 1500);
+  });
+}
+// Copia o que está na tela, sem botões, campos e filtros
+function cleanCloneHtml(el, extraRemove) {
+  var cl = el.cloneNode(true);
+  cl.querySelectorAll("[data-rgroup]").forEach(function(x){ if (x.parentNode && x.parentNode.parentNode) x.parentNode.remove(); });
+  var sel = "button, input, select, textarea, .searchbar, .chip-scroll, .chip-group, .checkbox-row, [data-rgroup], [data-rperiod], [data-rmov], [data-rtop]" + (extraRemove ? ", " + extraRemove : "");
+  cl.querySelectorAll(sel).forEach(function(x){ x.remove(); });
+  cl.querySelectorAll("[data-rgroup]").forEach(function(x){ x.remove(); });
+  cl.querySelectorAll("div").forEach(function(d){ if (!d.textContent.trim() && !d.querySelector("svg,img,table")) d.remove(); });
+  cl.querySelectorAll("[data-open],[data-order],[data-shipment],[data-rtoggle],[data-rcat]").forEach(function(x){ x.style.cursor = "default"; });
+  return cl.innerHTML.replace(/[▸▾] /g, "").replace(/Toque em (um|uma) [^.<]*\./g, "");
+}
 function renderPainel() {
   var storeId = currentStoreId;
   if (!storeId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
@@ -757,9 +818,9 @@ function renderEstoque() {
       '<div style="font-size:13px;">📋 Última contagem: ' + (last ? '<b>' + fmtDateShort(last.date) + '</b> · ' + fmtMoney(last.totalValue) : '<b>nenhuma</b>') + '</div>' +
       '<button class="btn btn-primary btn-sm" id="bCount">Contagem de estoque</button></div>';
   }
-  if (ALL_STOCK_ROLES.indexOf(currentRole()) !== -1) {
-    html += '<button class="btn btn-secondary" id="bAllStores" style="margin-bottom:12px;">🏬 Ver estoque de todas as lojas</button>';
-  }
+  html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">' +
+    (ALL_STOCK_ROLES.indexOf(currentRole()) !== -1 ? '<button class="btn btn-secondary" id="bAllStores" style="margin:0;flex:2;min-width:200px;">🏬 Ver estoque de todas as lojas</button>' : '') +
+    '<button class="btn btn-secondary" id="bStockPdf" style="margin:0;flex:1;min-width:140px;">📄 Resumo em PDF</button></div>';
   html += '<div class="searchbar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>' +
     '<input id="searchInput" type="text" placeholder="Buscar produto ou código..." value="' + esc(searchTerm) + '"></div>';
 
@@ -833,6 +894,7 @@ function renderEstoque() {
   });
   var bc = document.getElementById("bCount");
   if (bc) bc.addEventListener("click", openCountForm);
+  var bsp = document.getElementById("bStockPdf"); if (bsp) bsp.addEventListener("click", printEstoque);
   var ba = document.getElementById("bAllStores");
   if (ba) ba.addEventListener("click", function(){ estoqueAllMode = true; allStock = null; storeSelect.style.display = "none"; renderAllStoresStock(); loadAllStock(); });
 }
@@ -854,6 +916,48 @@ function loadAllStock() {
     })
     .catch(function(err){ allStockLoading = false; showToast("Erro ao carregar: " + errMsg(err)); });
 }
+function printEstoque() {
+  var money = canSeeCmv();
+  var t = (searchTerm || "").toLowerCase();
+  var list = storeProductOrder(currentStoreId).map(function(id){ return products[id]; }).filter(function(p){
+    if (t && (p.name||"").toLowerCase().indexOf(t) === -1 && (p.sku||"").toLowerCase().indexOf(t) === -1) return false;
+    return !estoqueCatFilter || ((p.categoryId && categories[p.categoryId]) ? p.categoryId : "_none") === estoqueCatFilter;
+  });
+  var groups = {}, order = [];
+  list.forEach(function(p){ var k = (p.categoryId && categories[p.categoryId]) ? p.categoryId : "_none"; if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(p); });
+  order.sort(function(a,b){ var na = a==="_none" ? "zzz" : categories[a].name, nb = b==="_none" ? "zzz" : categories[b].name; return na.localeCompare(nb, "pt-BR"); });
+  var tot = 0, withStock = 0, low = 0;
+  var h = '<table class="pr-table"><thead><tr><th>Produto</th><th class="n">Qtd</th><th>Un</th><th>Atualizado</th>' + (money ? '<th class="n">Custo un.</th><th class="n">Valor</th>' : '') + '</tr></thead><tbody>';
+  order.forEach(function(k){
+    var sub = 0;
+    h += '<tr class="pr-sub"><td colspan="' + (money ? 6 : 4) + '">' + esc(k==="_none" ? "Sem gênero" : categories[k].name) + '</td></tr>';
+    groups[k].forEach(function(p){
+      var st = scopedStock[p.id], q = st ? st.quantity : 0, v = q * (p.cost || 0);
+      if (q > 0) withStock++;
+      var isLow = typeof p.minStock === "number" && p.minStock > 0 && q <= p.minStock; if (isLow) low++;
+      sub += v; tot += v;
+      h += '<tr' + (isLow ? ' class="pend-row"' : '') + '><td>' + esc(p.name) + (isLow ? ' <b>(estoque baixo)</b>' : '') + '</td><td class="n"><b>' + fmtQty(q) + '</b></td><td>' + esc(p.unit||"un") + '</td>' +
+        '<td>' + (st && st.updatedAt ? esc(fmtDate(st.updatedAt)) : '—') + '</td>' + (money ? '<td class="n">' + fmtMoney(p.cost||0) + '</td><td class="n">' + fmtMoney(v) + '</td>' : '') + '</tr>';
+    });
+    if (money) h += '<tr><td colspan="5" class="n" style="color:#5b5f66;">Subtotal ' + esc(k==="_none" ? "Sem gênero" : categories[k].name) + '</td><td class="n"><b>' + fmtMoney(sub) + '</b></td></tr>';
+  });
+  h += '</tbody></table>';
+  var summary = '<div class="stat-grid"><div class="stat-box"><div class="num">' + list.length + '</div><div class="label">produtos</div></div>' +
+    '<div class="stat-box"><div class="num">' + withStock + '</div><div class="label">com estoque</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:var(--amber);">' + low + '</div><div class="label">abaixo do mínimo</div></div>' +
+    (money ? '<div class="stat-box"><div class="num">' + fmtMoney(tot) + '</div><div class="label">valor em estoque (custo)</div></div>' : '') + '</div>';
+  openPrintPreview("Estoque — " + (stores[currentStoreId] ? stores[currentStoreId].name : ""),
+    ["Loja: " + (stores[currentStoreId] ? stores[currentStoreId].name : ""), "Gênero: " + (estoqueCatFilter ? (estoqueCatFilter === "_none" ? "Sem gênero" : categories[estoqueCatFilter].name) : "Todos") + (t ? " · Busca: " + searchTerm : "")],
+    summary + h);
+}
+function printAllStores() {
+  var tbl = content.querySelector("table"); if (!tbl) { showToast("Aguarde carregar o estoque das lojas"); return; }
+  var cl = tbl.cloneNode(true); cl.className = "pr-table"; cl.removeAttribute("style");
+  cl.querySelectorAll("th, td").forEach(function(x){ x.style.position = "static"; x.style.background = ""; });
+  openPrintPreview("Estoque de todas as lojas",
+    ["Gênero: " + (estoqueCatFilter ? (estoqueCatFilter === "_none" ? "Sem gênero" : categories[estoqueCatFilter].name) : "Todos") + (allStockOnlyWith ? " · só produtos com estoque informado" : ""), "\"–\" = a loja ainda não informou o produto"],
+    cl.outerHTML);
+}
 function exitAllStores() {
   estoqueAllMode = false;
   storeSelect.style.display = "";
@@ -863,7 +967,7 @@ function renderAllStoresStock() {
   storeSelect.style.display = "none";
   var sids = storeOrder.filter(function(sid){ return stores[sid]; });
   var html = '<div class="section-head"><button class="link-btn" id="bAllBack">← Voltar para ' + esc(stores[currentStoreId] ? stores[currentStoreId].name : "a loja") + '</button>' +
-    '<button class="link-btn" id="bAllReload">🔄 Atualizar</button></div>' +
+    '<div style="display:flex;gap:14px;"><button class="link-btn" id="bAllPdf">📄 PDF</button><button class="link-btn" id="bAllReload">🔄 Atualizar</button></div></div>' +
     '<h2 style="font-size:18px;margin:0 0 4px 0;">🏬 Estoque de todas as lojas</h2>' +
     '<div style="font-size:12.5px;color:var(--text-2);margin-bottom:12px;">Saldo informado por cada loja (lançamentos, contagens e recebimentos).</div>';
   if (!allStock) {
@@ -925,6 +1029,7 @@ function renderAllStoresStock() {
 }
 function bindAllStores() {
   var b = document.getElementById("bAllBack"); if (b) b.addEventListener("click", exitAllStores);
+  var bp = document.getElementById("bAllPdf"); if (bp) bp.addEventListener("click", printAllStores);
   var r = document.getElementById("bAllReload"); if (r) r.addEventListener("click", function(){ allStock = null; renderAllStoresStock(); loadAllStock(); });
   var s = document.getElementById("allSearch");
   if (s) s.addEventListener("input", function(e){
@@ -1729,12 +1834,45 @@ var scopedOrdersToMe = [];   // pedidos recebidos por esta loja (estoque central
 var SUPPLIER_ROLES = ["Operador de Estoque","Diretoria","Gerência"];
 function canSeeSuppliers() { return SUPPLIER_ROLES.indexOf(currentRole()) !== -1; }
 
+function printCompras(orders, ships) {
+  var sname = stores[currentStoreId] ? stores[currentStoreId].name : "";
+  var h = '<div class="pr-sec">Pedidos (' + orders.length + ')</div>';
+  if (!orders.length) h += '<div style="color:#5b5f66;">Nenhum pedido.</div>';
+  else {
+    h += '<table class="pr-table"><thead><tr><th>Pedido</th><th>Loja → destino</th><th>Data / entrega</th><th>Situação</th><th class="n">Itens</th></tr></thead><tbody>';
+    orders.forEach(function(o){
+      var pend = o.status === "cancelado" ? [] : orderPendingList(o);
+      var stTxt = (o.status==="atendido" && o.partial) ? "Enviado parcial" : ({pendente:"Pendente", atendido:"Enviado", recebido:"Recebido", recusado:"Recusado", cancelado:"Cancelado"}[o.status] || o.status);
+      h += '<tr' + (pend.length ? ' class="pend-row"' : '') + '><td><b>' + esc(orderLabel(o)) + '</b>' + (o.createdByName ? '<br><span style="color:#5b5f66;">' + esc(o.createdByName) + '</span>' : '') + '</td>' +
+        '<td>' + esc(o.storeName) + ' → ' + esc(o.targetName) + '</td>' +
+        '<td>' + fmtDateShort(o.orderDate) + ' ' + esc(o.orderTime||"") + '<br><span style="color:#5b5f66;">entrega ' + (o.deliveryDate ? fmtDateShort(o.deliveryDate) : "—") + ' ' + esc(o.deliveryTime||"") + '</span></td>' +
+        '<td>' + esc(stTxt) + (pend.length ? '<br><b>⚠ ' + pend.length + ' pendente(s)</b>' : '') + '</td><td class="n">' + (o.items||[]).length + '</td></tr>';
+      (o.items||[]).forEach(function(it){
+        var f = (o.fulfillment||[]).filter(function(x){ return x.productId === it.productId; })[0];
+        var pi = pend.filter(function(x){ return x.productId === it.productId; })[0];
+        h += '<tr' + (pi ? ' class="pend-row"' : '') + '><td></td><td colspan="2" style="color:#33363c;">' + esc(it.productName) + '</td>' +
+          '<td colspan="2" class="n">Pedido ' + fmtQty(it.qty) + (f ? (f.status === "recusado" ? ' · recusado' : ' · entregue ' + fmtQty(f.qtySent)) : '') +
+          (pi && pi.qtyReceived !== null && pi.qtyReceived !== undefined ? ' · recebido ' + fmtQty(pi.qtyReceived) : '') + (pi ? ' · <b>falta ' + fmtQty(pi.pending) + '</b>' : '') + ' ' + esc(it.unit||"") + '</td></tr>';
+      });
+    });
+    h += '</tbody></table>';
+  }
+  if (ships && ships.length) {
+    h += '<div class="pr-sec">Envios e devoluções (' + ships.length + ')</div><table class="pr-table"><thead><tr><th>Data</th><th>Origem → destino</th><th>Tipo</th><th>Situação</th><th class="n">Itens</th></tr></thead><tbody>';
+    ships.forEach(function(s){
+      h += '<tr><td>' + esc(fmtDate(s.sentAt)) + '</td><td>' + esc(s.originStoreName) + ' → ' + esc(s.destStoreName) + '</td><td>' + esc(s.kind === "devolucao" ? "Devolução" : (s.orderLabel || "Envio")) + '</td>' +
+        '<td>' + esc(s.status === "enviado" ? "Em trânsito" : (s.status === "recebido_com_divergencia" ? "Recebido com divergência" : "Recebido")) + (s.receivedByName ? '<br><span style="color:#5b5f66;">' + esc(s.receivedByName) + '</span>' : '') + '</td><td class="n">' + (s.items||[]).length + '</td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+  openPrintPreview("Compras — " + sname, ["Loja: " + sname, "Pedidos e envios visíveis nesta loja"], h);
+}
 function renderCompras() {
   if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
   var isCentral = stores[currentStoreId] && stores[currentStoreId].isCentral;
   var pendingForMe = scopedShipmentsDest.filter(function(s){ return s.status==="enviado"; });
 
-  var html = '<div class="section-head"><h2>Compras</h2><button class="btn btn-primary btn-sm" id="bAdd">+ Novo pedido</button></div>';
+  var html = '<div class="section-head"><h2>Compras</h2><div style="display:flex;gap:10px;align-items:center;"><button class="link-btn" id="bComprasPdf">📄 PDF</button><button class="btn btn-primary btn-sm" id="bAdd">+ Novo pedido</button></div></div>';
 
   html += '<div class="actions-2" style="margin-bottom:16px;flex-wrap:wrap;">';
   if (isCentral) {
@@ -1778,6 +1916,7 @@ function renderCompras() {
   }
   content.innerHTML = html;
   document.getElementById("bAdd").addEventListener("click", openOrderForm);
+  document.getElementById("bComprasPdf").addEventListener("click", function(){ printCompras(orders, relatedShipments); });
   var sendBtn = document.getElementById("bSendShipment");
   if (sendBtn) sendBtn.addEventListener("click", function(){ openSendShipmentForm(null); });
   var recvBtn = document.getElementById("bReceiveShipment");
@@ -3243,6 +3382,9 @@ function openDiretoriaShipmentDetail(id) {
 var REPORT_ROLES = ["Operador de Estoque","Gerência","Diretoria"];
 function canSeeReports() { return REPORT_ROLES.indexOf(currentRole()) !== -1; }
 var REPORT_TYPES = [
+  {v:"lancamentos", l:"📒 Lançamentos de estoque"},
+  {v:"pedidos",    l:"🧾 Pedidos"},
+  {v:"contagens",  l:"📋 Contagens"},
   {v:"entregues",  l:"Itens entregues"},
   {v:"recebidas",  l:"Mercadorias recebidas"},
   {v:"xrecebido",  l:"Entregue × recebido"},
@@ -3253,7 +3395,7 @@ var REPORT_TYPES = [
   {v:"descartes",  l:"Descartados"}
 ];
 var GROUPS = [{v:"produto",l:"Produto"},{v:"dia",l:"Dia"},{v:"semana",l:"Semana"},{v:"mes",l:"Mês"},{v:"loja",l:"Loja"}];
-var repState = { type:"entregues", period:"mes", day:"", month:"", from:"", to:"", store:"", cat:"", group:"produto", onlyDiv:false, topBy:"qty" };
+var repState = { type:"entregues", movType:"", period:"mes", day:"", month:"", from:"", to:"", store:"", cat:"", group:"produto", onlyDiv:false, topBy:"qty" };
 var repData = null, repLoading = false, repOpen = {};
 
 function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
@@ -3293,17 +3435,21 @@ function storeName(id) { return stores[id] ? stores[id].name : "—"; }
 function unitOf(pid, fallback) { return fallback || (products[pid] && products[pid].unit) || "un"; }
 function costOf(pid) { return products[pid] ? (products[pid].cost || 0) : 0; }
 
-function loadReportData() {
+function loadReportData(r, key) {
   if (repLoading) return;
   repLoading = true;
+  var DAY = 86400000;
   Promise.all([
-    db.collection("shipments").orderBy("sentAt", "desc").limit(1000).get(),
-    db.collection("orders").orderBy("createdAt", "desc").limit(1000).get(),
-    db.collection("movements").where("type", "==", "perda").orderBy("timestamp", "desc").limit(1000).get(),
-    db.collection("purchases").orderBy("date", "desc").limit(1000).get()
-  ]).then(function(r){
+    db.collection("shipments").where("sentAt", ">=", r.start - 45*DAY).where("sentAt", "<", r.end).get(),
+    db.collection("orders").where("createdAt", ">=", r.start).where("createdAt", "<", r.end).get(),
+    db.collection("movements").where("timestamp", ">=", r.start).where("timestamp", "<", r.end).get(),
+    db.collection("purchases").where("date", ">=", r.startStr).where("date", "<=", r.endStr).get(),
+    db.collection("counts").where("date", ">=", r.startStr).where("date", "<=", r.endStr).get()
+  ]).then(function(res){
     function rows(snap) { return snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); }); }
-    repData = { shipments: rows(r[0]), orders: rows(r[1]), losses: rows(r[2]), purchases: rows(r[3]), loadedAt: Date.now() };
+    var mv = rows(res[2]);
+    repData = { key: key, shipments: rows(res[0]), orders: rows(res[1]), movements: mv,
+      losses: mv.filter(function(m){ return m.type === "perda"; }), purchases: rows(res[3]), counts: rows(res[4]), loadedAt: Date.now() };
     repLoading = false;
     if (currentRoute === "relatorios") renderRelatorios();
   }).catch(function(err){
@@ -3380,6 +3526,15 @@ function repRows(type, r) {
           note:(f.status === "recusado" ? "Recusado — " + (f.reason || "sem motivo") : "Envio parcial (pedido " + fmtQty(f.qtyOrdered) + ", enviado " + fmtQty(f.qtySent) + ")") + " · " + orderLabel(o)});
       });
     });
+  } else if (type === "lancamentos") {
+    D.movements.forEach(function(m){
+      if (!inRange(m.timestamp, r) || !storeOk(m.storeId) || !catOk(m.productId)) return;
+      var k = movKind(m);
+      if (repState.movType && repState.movType !== k) return;
+      out.push({ts:m.timestamp, storeId:m.storeId, productId:m.productId, name:m.productName, unit:unitOf(m.productId),
+        qty:m.quantity||0, value:(m.quantity||0)*costOf(m.productId), mkind:k, emp:m.employeeName||"",
+        note: MOV_KINDS[k] + (m.employeeName ? " · " + m.employeeName : "") + (m.note ? " · " + m.note : "")});
+    });
   } else if (type === "descartes") {
     D.losses.forEach(function(m){
       if (!inRange(m.timestamp, r) || !storeOk(m.storeId) || !catOk(m.productId)) return;
@@ -3390,8 +3545,14 @@ function repRows(type, r) {
   return out;
 }
 
+var MOV_KINDS = {entrada:"↓ Entrada", saida:"↑ Saída", perda:"⚠ Perda", ajuste:"📋 Ajuste de contagem"};
+function movKind(m) {
+  if (/^(Ajuste de contagem|Contagem parcial)/.test(m.note || "")) return "ajuste";
+  return m.type === "perda" ? "perda" : (m.type === "saida" ? "saida" : "entrada");
+}
 function groupKey(row, g) {
   var d = new Date(row.ts);
+  if (g === "func") return {k: row.emp || "_", l: row.emp || "Sem nome"};
   if (g === "dia") return {k: ymd(d), l: d.toLocaleDateString("pt-BR", {weekday:"short", day:"2-digit", month:"2-digit"})};
   if (g === "semana") { var w = weekStart(d), e = new Date(w); e.setDate(e.getDate()+6); return {k: ymd(w), l: "Semana " + fmtDM(w) + " a " + fmtDM(e)}; }
   if (g === "mes") { var m = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0"); return {k: m, l: monthLabel(m)}; }
@@ -3419,10 +3580,11 @@ function renderRelatorios() {
   if (!repState.day) repState.day = todayStr();
   if (!repState.month) repState.month = currentMonthStr();
   if (!repState.from) { var d0 = new Date(); d0.setDate(d0.getDate()-6); repState.from = ymd(d0); repState.to = todayStr(); }
-  if (!repData) { content.innerHTML = '<div class="loading-msg">Carregando relatórios…</div>'; loadReportData(); return; }
+  var _r0 = repRange(), _key = _r0.start + "_" + _r0.end;
+  if (!repData || repData.key !== _key) { content.innerHTML = '<div class="loading-msg">Buscando dados de ' + esc(_r0.label) + '…</div>'; loadReportData(_r0, _key); return; }
 
   var s = repState, r = repRange(), money = canSeeCmv();
-  var html = '<div class="section-head"><h2>Relatórios</h2><button class="link-btn" id="rpReload">🔄 Atualizar</button></div>';
+  var html = '<div class="section-head"><h2>Relatórios</h2><div style="display:flex;gap:14px;"><button class="link-btn" id="rpPdf">📄 Resumo em PDF</button><button class="link-btn" id="rpReload">🔄 Atualizar</button></div></div>';
 
   // tipo de relatório
   html += '<div class="chip-scroll" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;">' +
@@ -3450,6 +3612,8 @@ function renderRelatorios() {
 
   if (s.type === "top10") html += renderTop10(r, money);
   else if (s.type === "genero") html += renderPorGenero(r, money);
+  else if (s.type === "pedidos") html += renderPedidosReport(r);
+  else if (s.type === "contagens") html += renderContagensReport(r, money);
   else html += renderListReport(s.type, r, money);
 
   html += '<div style="font-size:11.5px;color:var(--text-2);margin-top:14px;">Dados carregados às ' + new Date(repData.loadedAt).toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"}) + '. Toque em Atualizar para ver lançamentos mais recentes.</div>';
@@ -3463,33 +3627,62 @@ var REPORT_HELP = {
   xrecebido: "Compara, item a item, o que o central enviou com o que a loja conferiu ao receber.",
   devolvidos: "Mercadorias devolvidas pelas lojas ao estoque central.",
   faltas: "Itens pedidos pelas lojas que o central recusou ou enviou a menos.",
-  descartes: "Perdas registradas no estoque (produto vencido, estragado, quebrado etc.)."
+  descartes: "Perdas registradas no estoque (produto vencido, estragado, quebrado etc.).",
+  lancamentos: "Todas as movimentações de estoque lançadas: entradas, saídas, perdas e ajustes de contagem. Toque em um produto para ver cada lançamento."
 };
 
+function printRelatorio() {
+  var s = repState, r = repRange();
+  var t = REPORT_TYPES.filter(function(x){ return x.v === s.type; })[0];
+  var box = document.createElement("div");
+  box.innerHTML = content.innerHTML;
+  // tira cabeçalho, tipos e o bloco de filtros (vão para o cabeçalho do PDF)
+  var head = box.querySelector(".section-head"); if (head) head.remove();
+  var f = box.querySelector("#rpStore"); if (f) { var blk = f.closest(".item-row"); if (blk) blk.remove(); }
+  var last = box.lastElementChild; if (last && /Dados carregados/.test(last.textContent)) last.remove();
+  var grp = { produto:"produto", dia:"dia", semana:"semana", mes:"mês", loja:"loja", func:"funcionário" }[s.group] || s.group;
+  var movT = s.type === "lancamentos" && s.movType ? {entrada:"Entradas", saida:"Saídas", perda:"Perdas", ajuste:"Ajustes de contagem"}[s.movType] : "";
+  openPrintPreview("Relatório — " + (t ? t.l.replace(/^[^A-Za-zÀ-ú]+/, "") : s.type),
+    ["Período: " + r.label, "Loja: " + (s.store ? storeName(s.store) : "Todas"), "Gênero: " + (s.cat ? catName(s.cat) : "Todos") + (movT ? " · Tipo: " + movT : ""),
+     (["top10","genero"].indexOf(s.type) === -1 ? "Resumo por " + grp : "")],
+    cleanCloneHtml(box));
+}
 function renderListReport(type, r, money) {
   var s = repState, rows = repRows(type, r);
   var xr = type === "xrecebido";
   var h = '<div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px;">' + REPORT_HELP[type] + '</div>';
   if (xr) h += '<div class="checkbox-row"><input type="checkbox" id="rpOnlyDiv"' + (s.onlyDiv?" checked":"") + '><label for="rpOnlyDiv">Mostrar só divergências</label></div>';
+  if (type === "lancamentos") {
+    h += '<div class="chip-group" style="margin-bottom:10px;">' + [["","Todos"],["entrada","Entradas"],["saida","Saídas"],["perda","Perdas"],["ajuste","Ajustes de contagem"]].map(function(t){
+      return '<div class="chip' + (s.movType===t[0]?" selected":"") + '" data-rmov="' + t[0] + '" style="padding:6px 11px;font-size:12.5px;">' + t[1] + '</div>'; }).join("") + '</div>';
+    var byK = {entrada:0, saida:0, perda:0, ajuste:0};
+    rows.forEach(function(x){ byK[x.mkind]++; });
+    h += '<div class="stat-grid">' +
+      '<div class="stat-box"><div class="num">' + rows.length + '</div><div class="label">lançamentos</div></div>' +
+      '<div class="stat-box"><div class="num" style="color:var(--green);">' + byK.entrada + '</div><div class="label">entradas</div></div>' +
+      '<div class="stat-box"><div class="num" style="color:var(--red);">' + byK.saida + '</div><div class="label">saídas</div></div>' +
+      '<div class="stat-box"><div class="num" style="color:var(--amber);">' + byK.perda + '</div><div class="label">perdas</div></div>' +
+      '<div class="stat-box"><div class="num">' + byK.ajuste + '</div><div class="label">ajustes de contagem</div></div></div>';
+  }
 
   var totalVal = rows.reduce(function(a,x){ return a + x.value; }, 0);
   var prods = sumByProduct(rows);
-  h += '<div class="stat-grid">' +
+  if (type !== "lancamentos") h += '<div class="stat-grid">' +
     '<div class="stat-box"><div class="num">' + rows.length + '</div><div class="label">lançamentos</div></div>' +
     '<div class="stat-box"><div class="num">' + prods.length + '</div><div class="label">produtos diferentes</div></div>';
   if (xr) {
     var div = rows.filter(function(x){ return Math.abs(x.received - x.sent) > 1e-9; });
     h += '<div class="stat-box"><div class="num" style="color:' + (div.length ? 'var(--red)' : 'var(--green)') + ';">' + div.length + '</div><div class="label">itens com divergência</div></div>';
     if (money) h += '<div class="stat-box"><div class="num" style="color:' + (totalVal < 0 ? 'var(--red)' : 'var(--text)') + ';">' + fmtMoney(totalVal) + '</div><div class="label">diferença em valor</div></div>';
-  } else if (money) {
+  } else if (money && type !== "lancamentos") {
     h += '<div class="stat-box wide"><div class="num">' + fmtMoney(totalVal) + '</div><div class="label">valor total (custo)</div></div>';
   }
-  h += '</div>';
+  if (type !== "lancamentos") h += '</div>';
 
   if (!rows.length) return h + '<div class="empty-state"><div class="emoji">📭</div>Nada encontrado neste período.</div>';
 
   h += '<div style="display:flex;align-items:center;gap:8px;margin:4px 0 8px 0;flex-wrap:wrap;"><span style="font-size:12.5px;font-weight:700;color:var(--text-2);">Agrupar por:</span>' +
-    GROUPS.map(function(g){ return '<div class="chip' + (s.group===g.v?" selected":"") + '" data-rgroup="' + g.v + '" style="padding:6px 11px;font-size:12.5px;">' + g.l + '</div>'; }).join("") + '</div>';
+    (type === "lancamentos" ? GROUPS.concat([{v:"func", l:"Funcionário"}]) : GROUPS).map(function(g){ return '<div class="chip' + (s.group===g.v?" selected":"") + '" data-rgroup="' + g.v + '" style="padding:6px 11px;font-size:12.5px;">' + g.l + '</div>'; }).join("") + '</div>';
 
   if (s.group === "produto") {
     prods.sort(function(a,b){ return a.name.localeCompare(b.name, "pt-BR"); });
@@ -3501,13 +3694,15 @@ function renderListReport(type, r, money) {
       if (!groups[g.k]) { groups[g.k] = {label:g.l, rows:[]}; order.push(g.k); }
       groups[g.k].rows.push(x);
     });
-    order.sort(); if (s.group !== "loja") order.reverse();
-    if (s.group === "loja") order.sort(function(a,b){ return groups[a].label.localeCompare(groups[b].label, "pt-BR"); });
+    order.sort(); if (s.group !== "loja" && s.group !== "func") order.reverse();
+    if (s.group === "loja" || s.group === "func") order.sort(function(a,b){ return groups[a].label.localeCompare(groups[b].label, "pt-BR"); });
     order.forEach(function(k){
       var g = groups[k], gp = sumByProduct(g.rows), gv = g.rows.reduce(function(a,x){ return a + x.value; }, 0);
       var open = repOpen["g:" + s.group + k] !== false;
       h += '<div data-rtoggle="g:' + s.group + k + '" style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 6px 0;cursor:pointer;">' +
-        '<div style="font-size:14px;font-weight:800;">' + (open ? "▾ " : "▸ ") + esc(g.label) + ' <span style="font-weight:500;color:var(--text-2);font-size:12.5px;">(' + gp.length + ' produto' + (gp.length===1?'':'s') + ')</span></div>' +
+        '<div style="font-size:14px;font-weight:800;">' + (open ? "▾ " : "▸ ") + esc(g.label) + ' <span style="font-weight:500;color:var(--text-2);font-size:12.5px;">(' + gp.length + ' produto' + (gp.length===1?'':'s') + ')</span>' +
+          (type === "lancamentos" ? '<div style="font-weight:600;font-size:12px;margin-top:2px;">' + ["entrada","saida","perda","ajuste"].map(function(kk){
+            var n = g.rows.filter(function(x){ return x.mkind === kk; }).length; return n ? MOV_KINDS[kk] + ': ' + n : ''; }).filter(Boolean).join(' · ') + '</div>' : '') + '</div>' +
         (money ? '<div style="font-weight:700;font-size:13.5px;">' + fmtMoney(gv) + '</div>' : '') + '</div>';
       if (!open) return;
       gp.sort(function(a,b){ return a.name.localeCompare(b.name, "pt-BR"); });
@@ -3517,6 +3712,84 @@ function renderListReport(type, r, money) {
   return h;
 }
 
+function periodGroups(items, tsOf, labelOf) {
+  var g = repState.group === "produto" || repState.group === "func" ? "dia" : repState.group;
+  var groups = {}, order = [];
+  items.forEach(function(x){
+    var k;
+    if (g === "loja") k = {k: x.storeId || "_", l: storeName(x.storeId)};
+    else k = groupKey({ts: tsOf(x)}, g);
+    if (!groups[k.k]) { groups[k.k] = {label: k.l, items: []}; order.push(k.k); }
+    groups[k.k].items.push(x);
+  });
+  order.sort(); if (g !== "loja") order.reverse();
+  else order.sort(function(a,b){ return groups[a].label.localeCompare(groups[b].label, "pt-BR"); });
+  return {g: g, order: order, groups: groups};
+}
+function groupChips() {
+  var s = repState, cur = s.group === "produto" || s.group === "func" ? "dia" : s.group;
+  return '<div style="display:flex;align-items:center;gap:8px;margin:4px 0 8px 0;flex-wrap:wrap;"><span style="font-size:12.5px;font-weight:700;color:var(--text-2);">Resumo por:</span>' +
+    [{v:"dia",l:"Dia"},{v:"semana",l:"Semana"},{v:"mes",l:"Mês"},{v:"loja",l:"Loja"}].map(function(g){
+      return '<div class="chip' + (cur===g.v?" selected":"") + '" data-rgroup="' + g.v + '" style="padding:6px 11px;font-size:12.5px;">' + g.l + '</div>'; }).join("") + '</div>';
+}
+function renderPedidosReport(r) {
+  var list = repData.orders.filter(function(o){ return inRange(o.createdAt, r) && storeOk(o.storeId) && o.targetStoreId; });
+  var h = '<div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px;">Pedidos feitos pelas lojas ao estoque central no período, com a situação de cada um e os itens que ficaram pendentes.</div>';
+  var st = {pend:0, atend:0, rec:0, recus:0, canc:0, comPend:0};
+  list.forEach(function(o){
+    if (o.status === "pendente") st.pend++; else if (o.status === "atendido") st.atend++; else if (o.status === "recebido") st.rec++;
+    else if (o.status === "recusado") st.recus++; else if (o.status === "cancelado") st.canc++;
+    if (o.status !== "cancelado" && orderPendingList(o).length) st.comPend++;
+  });
+  h += '<div class="stat-grid">' +
+    '<div class="stat-box"><div class="num">' + list.length + '</div><div class="label">pedidos</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:var(--amber);">' + st.pend + '</div><div class="label">aguardando atendimento</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:var(--accent);">' + st.atend + '</div><div class="label">entregues (a conferir)</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:var(--green);">' + st.rec + '</div><div class="label">recebidos</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:var(--amber);">' + st.comPend + '</div><div class="label">com itens pendentes</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:var(--red);">' + (st.recus + st.canc) + '</div><div class="label">recusados / cancelados</div></div></div>';
+  if (!list.length) return h + '<div class="empty-state"><div class="emoji">📭</div>Nenhum pedido neste período.</div>';
+  h += groupChips();
+  var pg = periodGroups(list, function(o){ return o.createdAt; });
+  pg.order.forEach(function(k){
+    var g = pg.groups[k];
+    h += '<div style="font-size:14px;font-weight:800;margin:14px 0 6px 0;">' + esc(g.label) + ' <span style="font-weight:500;color:var(--text-2);font-size:12.5px;">(' + g.items.length + ' pedido' + (g.items.length===1?'':'s') + ')</span></div>';
+    g.items.sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); }).forEach(function(o){
+      var pend = o.status === "cancelado" ? [] : orderPendingList(o);
+      h += '<div class="item-row' + (pend.length ? ' pend-row' : '') + '">' +
+        '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;"><div><b>' + orderLabel(o) + '</b>' +
+        '<div style="font-size:12px;color:var(--text-2);">' + esc(o.storeName) + ' → ' + esc(o.targetName) + ' · ' + fmtDateShort(o.orderDate) + ' ' + esc(o.orderTime||"") + ' · ' + (o.items||[]).length + ' item(ns)' + (o.createdByName ? ' · ' + esc(o.createdByName) : '') + '</div></div>' +
+        '<div style="white-space:nowrap;">' + orderStatusBadge(o) + '</div></div>' +
+        (pend.length ? '<div style="font-size:12.5px;margin-top:6px;">' + pend.map(function(x){ return '<div class="pend-txt">⚠ ' + esc(x.productName) + ': falta ' + fmtQty(x.pending) + ' ' + esc(x.unit||"") + '</div>'; }).join("") + '</div>' : '') +
+      '</div>';
+    });
+  });
+  return h;
+}
+function renderContagensReport(r, money) {
+  var list = repData.counts.filter(function(x){ return inRangeStr(x.date, r) && storeOk(x.storeId); });
+  var h = '<div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px;">Contagens de estoque feitas no período (completas e parciais por gênero).</div>';
+  var comp = list.filter(function(x){ return !x.partial; }).length, adj = list.reduce(function(a,x){ return a + (x.adjustments||0); }, 0);
+  h += '<div class="stat-grid">' +
+    '<div class="stat-box"><div class="num">' + list.length + '</div><div class="label">contagens</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:var(--green);">' + comp + '</div><div class="label">completas</div></div>' +
+    '<div class="stat-box"><div class="num">' + (list.length - comp) + '</div><div class="label">parciais (por gênero)</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:var(--amber);">' + adj + '</div><div class="label">ajustes de saldo</div></div></div>';
+  if (!list.length) return h + '<div class="empty-state"><div class="emoji">📭</div>Nenhuma contagem neste período.</div>';
+  h += groupChips();
+  var pg = periodGroups(list, function(x){ return dateFromStr(x.date).getTime() + 12*3600e3; });
+  pg.order.forEach(function(k){
+    var g = pg.groups[k];
+    h += '<div style="font-size:14px;font-weight:800;margin:14px 0 6px 0;">' + esc(g.label) + ' <span style="font-weight:500;color:var(--text-2);font-size:12.5px;">(' + g.items.length + ')</span></div>';
+    g.items.sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); }).forEach(function(x){
+      h += '<div class="item-row" style="display:flex;justify-content:space-between;gap:8px;">' +
+        '<div><b>' + esc(x.storeName || storeName(x.storeId)) + '</b> · ' + (x.partial ? 'Parcial — ' + esc(x.categoryName || "") : '<span style="color:var(--green);font-weight:700;">Completa</span>') +
+        '<div style="font-size:12px;color:var(--text-2);">' + fmtDateShort(x.date) + (x.createdAt ? ' · ' + new Date(x.createdAt).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}) : '') + (x.employeeName ? ' · ' + esc(x.employeeName) : '') + ' · ' + (x.items||[]).length + ' item(ns) contado(s) · ' + (x.adjustments||0) + ' ajuste(s)</div></div>' +
+        (money ? '<div style="white-space:nowrap;font-weight:700;">' + fmtMoney(x.totalValue||0) + '</div>' : '') + '</div>';
+    });
+  });
+  return h;
+}
 function productBlock(p, xr, money, key, expandable) {
   var open = !!repOpen[key];
   var right;
@@ -3622,10 +3895,13 @@ function bindRelatorios() {
   var s = repState;
   function on(id, ev, fn) { var el = document.getElementById(id); if (el) el.addEventListener(ev, fn); }
   on("rpReload", "click", function(){ repData = null; renderRelatorios(); });
+  on("rpPdf", "click", printRelatorio);
+  if (s.group === "func" && s.type !== "lancamentos") s.group = "produto";
   content.querySelectorAll("[data-rtype]").forEach(function(c){ c.addEventListener("click", function(){ s.type = c.getAttribute("data-rtype"); repOpen = {}; renderRelatorios(); }); });
   content.querySelectorAll("[data-rperiod]").forEach(function(c){ c.addEventListener("click", function(){ s.period = c.getAttribute("data-rperiod"); renderRelatorios(); }); });
   content.querySelectorAll("[data-rgroup]").forEach(function(c){ c.addEventListener("click", function(){ s.group = c.getAttribute("data-rgroup"); repOpen = {}; renderRelatorios(); }); });
   content.querySelectorAll("[data-rtop]").forEach(function(c){ c.addEventListener("click", function(){ s.topBy = c.getAttribute("data-rtop"); renderRelatorios(); }); });
+  content.querySelectorAll("[data-rmov]").forEach(function(c){ c.addEventListener("click", function(){ s.movType = c.getAttribute("data-rmov"); repOpen = {}; renderRelatorios(); }); });
   content.querySelectorAll("[data-rtoggle]").forEach(function(c){ c.addEventListener("click", function(){
     var k = c.getAttribute("data-rtoggle");
     repOpen[k] = k.indexOf("g:") === 0 && k.split(":").length === 2 ? (repOpen[k] === false) : !repOpen[k];
