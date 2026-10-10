@@ -536,6 +536,7 @@ drawerOverlay.addEventListener("click", closeDrawer);
 
 function navigate(route) {
   estoqueAllMode = false;
+  estoqueMovMode = false;
   currentRoute = route;
   syncDrawer();
   var r = ROUTES[route];
@@ -802,6 +803,7 @@ var ALL_STOCK_ROLES = ["Operador de Estoque","Gerência","Diretoria"];
 var estoqueAllMode = false, allStock = null, allStockLoading = false, allStockOnlyWith = true;
 function renderEstoque() {
   if (estoqueAllMode) { renderAllStoresStock(); return; }
+  if (estoqueMovMode) { renderStoreMovs(); return; }
   if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
   var list = storeProductOrder(currentStoreId).map(function(id){ return products[id]; });
   if (searchTerm) {
@@ -820,6 +822,7 @@ function renderEstoque() {
   }
   html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">' +
     (ALL_STOCK_ROLES.indexOf(currentRole()) !== -1 ? '<button class="btn btn-secondary" id="bAllStores" style="margin:0;flex:2;min-width:200px;">🏬 Ver estoque de todas as lojas</button>' : '') +
+    '<button class="btn btn-secondary" id="bMovs" style="margin:0;flex:2;min-width:200px;">📒 Lançamentos por data</button>' +
     '<button class="btn btn-secondary" id="bStockPdf" style="margin:0;flex:1;min-width:140px;">📄 Resumo em PDF</button></div>';
   html += '<div class="searchbar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>' +
     '<input id="searchInput" type="text" placeholder="Buscar produto ou código..." value="' + esc(searchTerm) + '"></div>';
@@ -895,6 +898,7 @@ function renderEstoque() {
   var bc = document.getElementById("bCount");
   if (bc) bc.addEventListener("click", openCountForm);
   var bsp = document.getElementById("bStockPdf"); if (bsp) bsp.addEventListener("click", printEstoque);
+  var bmv = document.getElementById("bMovs"); if (bmv) bmv.addEventListener("click", function(){ estoqueMovMode = true; movSearch = ""; renderStoreMovs(); });
   var ba = document.getElementById("bAllStores");
   if (ba) ba.addEventListener("click", function(){ estoqueAllMode = true; allStock = null; storeSelect.style.display = "none"; renderAllStoresStock(); loadAllStock(); });
 }
@@ -957,6 +961,121 @@ function printAllStores() {
   openPrintPreview("Estoque de todas as lojas",
     ["Gênero: " + (estoqueCatFilter ? (estoqueCatFilter === "_none" ? "Sem gênero" : categories[estoqueCatFilter].name) : "Todos") + (allStockOnlyWith ? " · só produtos com estoque informado" : ""), "\"–\" = a loja ainda não informou o produto"],
     cl.outerHTML);
+}
+// ---------- LANÇAMENTOS DA LOJA POR DATA ----------
+var estoqueMovMode = false, movData = null, movLoading = false, movSearch = "";
+var movState = { period:"dia", day:"", month:"", from:"", to:"", type:"" };
+function movRange() {
+  var s = movState, a, b, label;
+  if (s.period === "dia") { a = dateFromStr(s.day); b = new Date(a); b.setDate(b.getDate()+1); label = a.toLocaleDateString("pt-BR", {weekday:"long", day:"2-digit", month:"2-digit", year:"numeric"}); }
+  else if (s.period === "semana") { a = weekStart(dateFromStr(s.day)); b = new Date(a); b.setDate(b.getDate()+7); var l = new Date(b); l.setDate(l.getDate()-1); label = "Semana de " + fmtDM(a) + " a " + fmtDM(l) + "/" + l.getFullYear(); }
+  else if (s.period === "mes") { a = dateFromStr(s.month + "-01"); b = new Date(a.getFullYear(), a.getMonth()+1, 1); label = monthLabel(s.month); }
+  else { var f = s.from || todayStr(), t = s.to || f; if (t < f) { var x = f; f = t; t = x; } a = dateFromStr(f); b = dateFromStr(t); b.setDate(b.getDate()+1); label = fmtDateShort(f) + " a " + fmtDateShort(t); }
+  return { start: a.getTime(), end: b.getTime(), label: label };
+}
+function loadStoreMovs(r, key) {
+  if (movLoading) return;
+  movLoading = true;
+  db.collection("movements").where("storeId", "==", currentStoreId).where("timestamp", ">=", r.start).where("timestamp", "<", r.end).get()
+    .then(function(qs){
+      movData = { key: key, rows: qs.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); }), loadedAt: Date.now() };
+      movLoading = false;
+      if (currentRoute === "estoque" && estoqueMovMode) renderStoreMovs();
+    }).catch(function(err){ movLoading = false; content.innerHTML = '<div class="empty-state"><div class="emoji">⚠️</div>Não foi possível buscar os lançamentos.<br>' + esc(errMsg(err)) + '</div>'; });
+}
+function storeMovRows() {
+  var t = (movSearch || "").toLowerCase();
+  return (movData ? movData.rows : []).filter(function(m){
+    if (movState.type && movKind(m) !== movState.type) return false;
+    if (t && (m.productName || "").toLowerCase().indexOf(t) === -1 && (m.employeeName || "").toLowerCase().indexOf(t) === -1) return false;
+    return true;
+  }).sort(function(a,b){ return (b.timestamp||0) - (a.timestamp||0); });
+}
+function renderStoreMovs() {
+  if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
+  var s = movState;
+  if (!s.day) s.day = todayStr();
+  if (!s.month) s.month = todayStr().slice(0,7);
+  if (!s.from) { var d0 = new Date(); d0.setDate(d0.getDate()-6); s.from = ymd(d0); s.to = todayStr(); }
+  var r = movRange(), key = currentStoreId + "_" + r.start + "_" + r.end;
+  var sname = stores[currentStoreId] ? stores[currentStoreId].name : "";
+  var html = '<div class="section-head"><button class="link-btn" id="mvBack">← Voltar ao estoque</button>' +
+    '<div style="display:flex;gap:14px;"><button class="link-btn" id="mvPdf">📄 PDF</button><button class="link-btn" id="mvReload">🔄 Atualizar</button></div></div>' +
+    '<h2 style="font-size:18px;margin:0 0 10px 0;">📒 Lançamentos — ' + esc(sname) + '</h2>' +
+    '<div class="item-row" style="margin-bottom:12px;"><div class="chip-group" style="margin-bottom:10px;">' +
+      [["dia","Dia"],["semana","Semana"],["mes","Mês"],["periodo","Período"]].map(function(p){ return '<div class="chip' + (s.period===p[0]?" selected":"") + '" data-mvp="' + p[0] + '">' + p[1] + '</div>'; }).join("") + '</div>';
+  if (s.period === "dia" || s.period === "semana") html += '<div class="field" style="margin-bottom:0;"><label>' + (s.period==="dia" ? "Dia" : "Qualquer dia da semana") + '</label><input type="date" id="mvDay" value="' + s.day + '"></div>';
+  else if (s.period === "mes") html += '<div class="field" style="margin-bottom:0;"><label>Mês</label><input type="month" id="mvMonth" value="' + s.month + '"></div>';
+  else html += '<div class="row2"><div class="field" style="margin-bottom:0;"><label>De</label><input type="date" id="mvFrom" value="' + s.from + '"></div><div class="field" style="margin-bottom:0;"><label>Até</label><input type="date" id="mvTo" value="' + s.to + '"></div></div>';
+  html += '</div>';
+  if (!movData || movData.key !== key) {
+    content.innerHTML = html + '<div class="loading-msg">Buscando lançamentos de ' + esc(r.label) + '…</div>';
+    bindStoreMovs(); loadStoreMovs(r, key); return;
+  }
+  html += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">📅 ' + esc(r.label) + '</div>';
+  html += '<div class="chip-group" style="margin-bottom:10px;">' + [["","Todos"],["entrada","Entradas"],["saida","Saídas"],["perda","Perdas"],["ajuste","Ajustes de contagem"]].map(function(t){
+    return '<div class="chip' + (s.type===t[0]?" selected":"") + '" data-mvt="' + t[0] + '" style="padding:6px 11px;font-size:12.5px;">' + t[1] + '</div>'; }).join("") + '</div>';
+  html += '<div class="searchbar"><input id="mvSearch" type="text" placeholder="Buscar produto ou funcionário..." value="' + esc(movSearch) + '"></div>';
+  var rows = storeMovRows();
+  var byK = {entrada:0, saida:0, perda:0, ajuste:0};
+  rows.forEach(function(m){ byK[movKind(m)]++; });
+  html += '<div class="stat-grid">' +
+    '<div class="stat-box"><div class="num">' + rows.length + '</div><div class="label">lançamentos</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:var(--green);">' + byK.entrada + '</div><div class="label">entradas</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:var(--red);">' + byK.saida + '</div><div class="label">saídas</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:var(--amber);">' + (byK.perda + byK.ajuste) + '</div><div class="label">perdas e ajustes</div></div></div>';
+  if (!rows.length) {
+    html += '<div class="empty-state"><div class="emoji">📭</div>Nenhum lançamento ' + (movSearch || s.type ? 'com esses filtros ' : '') + 'em ' + esc(r.label) + '.</div>';
+  } else {
+    var lastDay = "";
+    rows.forEach(function(m){
+      var d = new Date(m.timestamp), dk = ymd(d), k = movKind(m), p = products[m.productId];
+      if (dk !== lastDay) {
+        lastDay = dk;
+        var n = rows.filter(function(x){ return ymd(new Date(x.timestamp)) === dk; }).length;
+        html += '<div style="font-size:13.5px;font-weight:800;margin:14px 0 6px 0;">' + esc(d.toLocaleDateString("pt-BR", {weekday:"long", day:"2-digit", month:"2-digit"})) + ' <span style="font-weight:500;color:var(--text-2);font-size:12px;">(' + n + ')</span></div>';
+      }
+      var color = k === "entrada" ? "var(--green)" : (k === "saida" ? "var(--red)" : "var(--amber)");
+      html += '<div class="move-item"><div class="move-icon ' + (k === "ajuste" ? "perda" : k) + '">' + (k === "entrada" ? "↓" : k === "saida" ? "↑" : k === "perda" ? "⚠" : "📋") + '</div>' +
+        '<div class="move-body"><div class="move-title">' + esc(m.productName || (p ? p.name : "")) + '</div>' +
+        '<div class="move-sub">' + d.toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"}) + ' · ' + esc(MOV_KINDS[k].replace(/^\S+ /, "")) + (m.employeeName ? ' · ' + esc(m.employeeName) : '') + (m.note ? ' · ' + esc(m.note) : '') + '</div></div>' +
+        '<div class="move-qty" style="color:' + color + ';">' + (k === "entrada" ? "+" : k === "ajuste" ? "" : "−") + fmtQty(m.quantity) + ' ' + esc(p ? (p.unit || "un") : "un") + '</div></div>';
+    });
+  }
+  content.innerHTML = html;
+  bindStoreMovs();
+}
+function bindStoreMovs() {
+  var s = movState;
+  function on(id, ev, fn) { var el = document.getElementById(id); if (el) el.addEventListener(ev, fn); }
+  on("mvBack", "click", function(){ estoqueMovMode = false; renderEstoque(); });
+  on("mvReload", "click", function(){ movData = null; renderStoreMovs(); });
+  on("mvPdf", "click", printStoreMovs);
+  content.querySelectorAll("[data-mvp]").forEach(function(ch){ ch.addEventListener("click", function(){ s.period = ch.getAttribute("data-mvp"); renderStoreMovs(); }); });
+  content.querySelectorAll("[data-mvt]").forEach(function(ch){ ch.addEventListener("click", function(){ s.type = ch.getAttribute("data-mvt"); renderStoreMovs(); }); });
+  on("mvDay", "change", function(e){ if (e.target.value) { s.day = e.target.value; renderStoreMovs(); } });
+  on("mvMonth", "change", function(e){ if (e.target.value) { s.month = e.target.value; renderStoreMovs(); } });
+  on("mvFrom", "change", function(e){ if (e.target.value) { s.from = e.target.value; renderStoreMovs(); } });
+  on("mvTo", "change", function(e){ if (e.target.value) { s.to = e.target.value; renderStoreMovs(); } });
+  on("mvSearch", "input", function(e){
+    movSearch = e.target.value; renderStoreMovs();
+    var el = document.getElementById("mvSearch"); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  });
+}
+function printStoreMovs() {
+  if (!movData) { showToast("Aguarde carregar os lançamentos"); return; }
+  var r = movRange(), rows = storeMovRows(), sname = stores[currentStoreId] ? stores[currentStoreId].name : "";
+  var h = '<table class="pr-table"><thead><tr><th>Data/hora</th><th>Produto</th><th>Tipo</th><th class="n">Qtd</th><th>Funcionário / obs.</th></tr></thead><tbody>';
+  rows.forEach(function(m){
+    var k = movKind(m), p = products[m.productId], d = new Date(m.timestamp);
+    h += '<tr><td>' + esc(d.toLocaleDateString("pt-BR", {day:"2-digit", month:"2-digit"}) + " " + d.toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"})) + '</td><td>' + esc(m.productName || "") + '</td>' +
+      '<td>' + esc(MOV_KINDS[k].replace(/^\S+ /, "")) + '</td><td class="n"><b>' + (k === "entrada" ? "+" : k === "ajuste" ? "" : "−") + fmtQty(m.quantity) + '</b> ' + esc(p ? (p.unit||"un") : "un") + '</td>' +
+      '<td>' + esc((m.employeeName || "") + (m.note ? " · " + m.note : "")) + '</td></tr>';
+  });
+  h += '</tbody></table>';
+  if (!rows.length) h = '<div style="color:#5b5f66;">Nenhum lançamento no período.</div>';
+  var tipo = movState.type ? {entrada:"Entradas", saida:"Saídas", perda:"Perdas", ajuste:"Ajustes de contagem"}[movState.type] : "Todos";
+  openPrintPreview("Lançamentos de estoque — " + sname, ["Loja: " + sname, "Período: " + r.label, "Tipo: " + tipo + (movSearch ? " · Busca: " + movSearch : ""), rows.length + " lançamento(s)"], h);
 }
 function exitAllStores() {
   estoqueAllMode = false;
