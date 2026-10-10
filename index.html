@@ -464,6 +464,7 @@ var ROUTES = {
   tarefas:       {title:"Tarefas", storeScoped:true, group:"op"},
   relatorios:    {title:"Relatórios", storeScoped:false, group:"op"},
   geladeira:     {title:"Contagem de geladeira", storeScoped:true, group:"op"},
+  producao:      {title:"Produção", storeScoped:true, group:"op"},
   produtos:      {title:"Produtos", storeScoped:false, group:"cad"},
   precos:        {title:"Atualizar preços", storeScoped:false, group:"cad"},
   fornecedores:  {title:"Fornecedores", storeScoped:false, group:"cad"},
@@ -471,7 +472,7 @@ var ROUTES = {
   funcionarios:  {title:"Funcionários", storeScoped:false, group:"cad"},
   diretoria:     {title:"Diretoria", storeScoped:false, group:"dir"}
 };
-var ROUTE_ICONS = {painel:"📊",estoque:"📦",compras:"🧾",custos:"💰",vendas:"📈",tarefas:"✅",relatorios:"📑",geladeira:"🧊",
+var ROUTE_ICONS = {painel:"📊",estoque:"📦",compras:"🧾",custos:"💰",vendas:"📈",tarefas:"✅",relatorios:"📑",geladeira:"🧊",producao:"🔪",
   produtos:"🏷️",precos:"💲",fornecedores:"🚚",lojas:"🏬",funcionarios:"👥",diretoria:"🔒"};
 
 function buildDrawer() {
@@ -485,7 +486,7 @@ function buildDrawer() {
     bindDrawerLogout();
     return;
   }
-  ["painel","estoque","compras","geladeira","custos","vendas","tarefas","relatorios"].forEach(function(r){
+  ["painel","estoque","compras","producao","geladeira","custos","vendas","tarefas","relatorios"].forEach(function(r){
     html += '<div class="item' + (currentRoute===r?" active":"") + '" data-route="' + r + '">' + ROUTE_ICONS[r] + ' ' + ROUTES[r].title + '</div>';
   });
   html += '<h3>Cadastros</h3>';
@@ -561,6 +562,7 @@ function renderRoute() {
     case "vendas": return renderVendas();
     case "relatorios": return renderRelatorios();
     case "geladeira": return renderGeladeira();
+    case "producao": return renderProducao();
     case "tarefas": return renderTarefas();
     case "produtos": return renderProdutos();
     case "precos": return renderPrecos();
@@ -716,6 +718,238 @@ function cleanCloneHtml(el, extraRemove) {
   cl.querySelectorAll("div").forEach(function(d){ if (!d.textContent.trim() && !d.querySelector("svg,img,table")) d.remove(); });
   cl.querySelectorAll("[data-open],[data-order],[data-shipment],[data-rtoggle],[data-rcat]").forEach(function(x){ x.style.cursor = "default"; });
   return cl.innerHTML.replace(/[▸▾] /g, "").replace(/Toque em (um|uma) [^.<]*\./g, "");
+}
+// ============================================================
+// PRODUÇÃO (porcionamento: peso bruto → filés, iscas e descarte)
+// ============================================================
+var DEFAULT_PROD_TEMPLATES = [
+  {id:"frango", name:"Filé de frango", rawProductId:"", filetProductId:"fpncvs8riaqf0kodi4mv", iscaProductId:""},
+  {id:"peixe",  name:"Filé de peixe",  rawProductId:"", filetProductId:"v02wzzyiqmjpzq7k5dgr", iscaProductId:""}
+];
+var prodTemplates = null, prodData = null, prodLoading = false, prodTpl = "";
+var prodState = { period:"dia", day:"", month:"", from:"", to:"" };
+function canManageProd() { var r = currentRole(); return r === "Gerência" || r === "Diretoria"; }
+function prodTemplatesList() { return (prodTemplates && prodTemplates.items) || DEFAULT_PROD_TEMPLATES; }
+function loadProdTemplates() {
+  return db.doc("meta/productionTemplates").get().then(function(snap){
+    prodTemplates = snap.exists ? snap.data() : {items: DEFAULT_PROD_TEMPLATES};
+  }).catch(function(){ prodTemplates = {items: DEFAULT_PROD_TEMPLATES}; });
+}
+function prodRange() {
+  var s = prodState, a, b, label;
+  if (s.period === "dia") { a = dateFromStr(s.day); b = new Date(a); b.setDate(b.getDate()+1); label = a.toLocaleDateString("pt-BR", {weekday:"long", day:"2-digit", month:"2-digit", year:"numeric"}); }
+  else if (s.period === "semana") { a = weekStart(dateFromStr(s.day)); b = new Date(a); b.setDate(b.getDate()+7); var l = new Date(b); l.setDate(l.getDate()-1); label = "Semana de " + fmtDM(a) + " a " + fmtDM(l) + "/" + l.getFullYear(); }
+  else if (s.period === "mes") { a = dateFromStr(s.month + "-01"); b = new Date(a.getFullYear(), a.getMonth()+1, 1); label = monthLabel(s.month); }
+  else { var f = s.from || todayStr(), t = s.to || f; if (t < f) { var x = f; f = t; t = x; } a = dateFromStr(f); b = dateFromStr(t); b.setDate(b.getDate()+1); label = fmtDateShort(f) + " a " + fmtDateShort(t); }
+  var last = new Date(b); last.setDate(last.getDate()-1);
+  return { start: a.getTime(), end: b.getTime(), startStr: ymd(a), endStr: ymd(last), label: label };
+}
+function prodCalc(e) {
+  var raw = e.rawKg || 0, fil = e.filetKg || 0, isc = e.iscaKg || 0, dsc = e.discardKg || 0;
+  var diff = raw - fil - isc - dsc;
+  function pct(v) { return raw > 0 ? v / raw * 100 : 0; }
+  return { raw:raw, fil:fil, isc:isc, dsc:dsc, diff:diff, pFil:pct(fil), pIsc:pct(isc), pDsc:pct(dsc), pDiff:pct(diff),
+    avgG: (e.filetQty > 0 && fil > 0) ? fil / e.filetQty * 1000 : 0 };
+}
+function fmtKg(v) { return (Math.round((v||0) * 1000) / 1000).toLocaleString("pt-BR", {maximumFractionDigits:3}) + " kg"; }
+function fmtPct(v) { return (Math.round(v * 10) / 10).toLocaleString("pt-BR", {maximumFractionDigits:1}) + "%"; }
+function loadProdData(r, key) {
+  if (prodLoading) return;
+  prodLoading = true;
+  Promise.all([
+    prodTemplates ? Promise.resolve() : loadProdTemplates(),
+    db.collection("production").where("storeId", "==", currentStoreId).where("date", ">=", r.startStr).where("date", "<=", r.endStr).get()
+  ]).then(function(res){
+    prodData = { key: key, rows: res[1].docs.map(function(d){ return Object.assign({id:d.id}, d.data()); }) };
+    prodLoading = false;
+    if (currentRoute === "producao") renderProducao();
+  }).catch(function(err){ prodLoading = false; content.innerHTML = '<div class="empty-state"><div class="emoji">⚠️</div>Não foi possível carregar a produção.<br>' + esc(errMsg(err)) + '</div>'; });
+}
+function renderProducao() {
+  if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
+  if (!currentEmployeeId) { content.innerHTML = '<div class="empty-state">Escolha quem está usando o sistema.</div>'; return; }
+  var s = prodState;
+  if (!s.day) s.day = todayStr();
+  if (!s.month) s.month = todayStr().slice(0,7);
+  if (!s.from) { var d0 = new Date(); d0.setDate(d0.getDate()-6); s.from = ymd(d0); s.to = todayStr(); }
+  var r = prodRange(), key = currentStoreId + "_" + r.startStr + "_" + r.endStr;
+  var html = '<div class="section-head"><h2>🔪 Produção</h2><button class="btn btn-primary btn-sm" id="pdNew">+ Lançar produção</button></div>' +
+    '<div style="font-size:12.5px;color:var(--text-2);margin:-4px 0 12px 0;">Registre o porcionamento: peso bruto, filés, iscas e descarte. O sistema calcula o rendimento.</div>' +
+    '<div class="item-row" style="margin-bottom:12px;"><div class="chip-group" style="margin-bottom:10px;">' +
+      [["dia","Dia"],["semana","Semana"],["mes","Mês"],["periodo","Período"]].map(function(p){ return '<div class="chip' + (s.period===p[0]?" selected":"") + '" data-pdp="' + p[0] + '">' + p[1] + '</div>'; }).join("") + '</div>';
+  if (s.period === "dia" || s.period === "semana") html += '<div class="field" style="margin-bottom:0;"><label>' + (s.period==="dia" ? "Dia" : "Qualquer dia da semana") + '</label><input type="date" id="pdDay" value="' + s.day + '"></div>';
+  else if (s.period === "mes") html += '<div class="field" style="margin-bottom:0;"><label>Mês</label><input type="month" id="pdMonth" value="' + s.month + '"></div>';
+  else html += '<div class="row2"><div class="field" style="margin-bottom:0;"><label>De</label><input type="date" id="pdFrom" value="' + s.from + '"></div><div class="field" style="margin-bottom:0;"><label>Até</label><input type="date" id="pdTo" value="' + s.to + '"></div></div>';
+  html += '</div>';
+  if (!prodData || prodData.key !== key) {
+    content.innerHTML = html + '<div class="loading-msg">Carregando produção de ' + esc(r.label) + '…</div>';
+    bindProducao(); loadProdData(r, key); return;
+  }
+  var tpls = prodTemplatesList();
+  html += '<div class="chip-group" style="margin-bottom:10px;"><div class="chip' + (!prodTpl ? ' selected' : '') + '" data-pdt="">Todos</div>' +
+    tpls.map(function(t){ return '<div class="chip' + (prodTpl===t.id ? ' selected' : '') + '" data-pdt="' + esc(t.id) + '">' + esc(t.name) + '</div>'; }).join("") + '</div>';
+  var rows = prodData.rows.filter(function(e){ return !prodTpl || e.templateId === prodTpl; }).sort(function(a,b){ return (b.date||"").localeCompare(a.date||"") || (b.createdAt||0) - (a.createdAt||0); });
+  var tot = {raw:0, fil:0, qty:0, isc:0, dsc:0};
+  rows.forEach(function(e){ tot.raw += e.rawKg||0; tot.fil += e.filetKg||0; tot.qty += e.filetQty||0; tot.isc += e.iscaKg||0; tot.dsc += e.discardKg||0; });
+  var tc = prodCalc({rawKg:tot.raw, filetKg:tot.fil, iscaKg:tot.isc, discardKg:tot.dsc, filetQty:tot.qty});
+  html += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">📅 ' + esc(r.label) + ' · ' + esc(stores[currentStoreId].name) + '</div>' +
+    '<div class="stat-grid">' +
+      '<div class="stat-box"><div class="num">' + rows.length + '</div><div class="label">produções</div></div>' +
+      '<div class="stat-box"><div class="num">' + fmtKg(tot.raw) + '</div><div class="label">peso bruto</div></div>' +
+      '<div class="stat-box"><div class="num" style="color:var(--green);">' + fmtQty(tot.qty) + ' un</div><div class="label">filés · ' + fmtKg(tot.fil) + ' (' + fmtPct(tc.pFil) + ')</div></div>' +
+      '<div class="stat-box"><div class="num">' + fmtKg(tot.isc) + '</div><div class="label">iscas (' + fmtPct(tc.pIsc) + ')</div></div>' +
+      '<div class="stat-box"><div class="num" style="color:var(--red);">' + fmtKg(tot.dsc) + '</div><div class="label">descarte (' + fmtPct(tc.pDsc) + ')</div></div>' +
+      (tot.raw ? '<div class="stat-box"><div class="num" style="color:var(--amber);">' + fmtKg(tc.diff) + '</div><div class="label">diferença não registrada (' + fmtPct(tc.pDiff) + ')</div></div>' : '') +
+    '</div>';
+  html += '<div style="display:flex;gap:14px;margin-bottom:6px;">' + (rows.length ? '<button class="link-btn" id="pdPdf">📄 Resumo em PDF</button>' : '') +
+    (canManageProd() ? '<button class="link-btn" id="pdTpl">⚙ Modelos de produção</button>' : '') + '</div>';
+  if (!rows.length) html += '<div class="empty-state"><div class="emoji">🔪</div>Nenhuma produção lançada em ' + esc(r.label) + '.</div>';
+  var lastDay = "";
+  rows.forEach(function(e){
+    if (e.date !== lastDay) { lastDay = e.date; html += '<div style="font-size:13.5px;font-weight:800;margin:14px 0 6px 0;">' + esc(dateFromStr(e.date).toLocaleDateString("pt-BR", {weekday:"long", day:"2-digit", month:"2-digit"})) + '</div>'; }
+    var k = prodCalc(e);
+    html += '<div class="card" data-pdopen="' + e.id + '" style="flex-direction:column;align-items:stretch;gap:6px;">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;"><div class="name">' + esc(e.templateName) + '</div><div style="font-weight:700;">' + fmtKg(k.raw) + ' bruto</div></div>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px;">' +
+        '<span style="color:var(--green);font-weight:700;">Filés: ' + fmtQty(e.filetQty||0) + ' un · ' + fmtKg(k.fil) + ' (' + fmtPct(k.pFil) + ')</span>' +
+        '<span>Iscas: ' + fmtKg(k.isc) + ' (' + fmtPct(k.pIsc) + ')</span>' +
+        '<span style="color:var(--red);">Descarte: ' + fmtKg(k.dsc) + ' (' + fmtPct(k.pDsc) + ')</span></div>' +
+      '<div class="meta">' + (k.avgG ? 'Peso médio do filé: ' + Math.round(k.avgG) + ' g · ' : '') + (Math.abs(k.diff) > 0.0005 ? '<span style="color:' + (k.diff < 0 ? 'var(--red)' : 'var(--amber)') + ';font-weight:600;">Diferença: ' + fmtKg(k.diff) + '</span> · ' : '') +
+        esc(e.employeeName || "") + (e.note ? ' · ' + esc(e.note) : '') + '</div></div>';
+  });
+  content.innerHTML = html;
+  bindProducao();
+}
+function bindProducao() {
+  var s = prodState;
+  function on(id, ev, fn) { var el = document.getElementById(id); if (el) el.addEventListener(ev, fn); }
+  on("pdNew", "click", function(){ openProductionForm(null); });
+  on("pdPdf", "click", printProducao);
+  on("pdTpl", "click", openProdTemplates);
+  content.querySelectorAll("[data-pdp]").forEach(function(ch){ ch.addEventListener("click", function(){ s.period = ch.getAttribute("data-pdp"); renderProducao(); }); });
+  content.querySelectorAll("[data-pdt]").forEach(function(ch){ ch.addEventListener("click", function(){ prodTpl = ch.getAttribute("data-pdt"); renderProducao(); }); });
+  content.querySelectorAll("[data-pdopen]").forEach(function(cd){ cd.addEventListener("click", function(){ openProductionForm(cd.getAttribute("data-pdopen")); }); });
+  on("pdDay", "change", function(e){ if (e.target.value) { s.day = e.target.value; renderProducao(); } });
+  on("pdMonth", "change", function(e){ if (e.target.value) { s.month = e.target.value; renderProducao(); } });
+  on("pdFrom", "change", function(e){ if (e.target.value) { s.from = e.target.value; renderProducao(); } });
+  on("pdTo", "change", function(e){ if (e.target.value) { s.to = e.target.value; renderProducao(); } });
+}
+function openProductionForm(id) {
+  var e = id && prodData ? prodData.rows.filter(function(x){ return x.id === id; })[0] : null;
+  var readOnly = !!e && currentRole() !== "Diretoria";
+  var dis = readOnly ? " disabled" : "";
+  var tpls = prodTemplatesList();
+  var tplId = e ? e.templateId : (prodTpl || tpls[0].id);
+  function num(v) { return (v === undefined || v === null || v === "") ? "" : String(v); }
+  var html = '<h2>' + (e ? 'Produção — ' + esc(e.templateName) : '🔪 Lançar produção') + '</h2>' +
+    '<div class="sub">' + esc(stores[currentStoreId].name) + (e ? ' · lançado por ' + esc(e.employeeName||"") + ' em ' + esc(fmtDate(e.createdAt)) : '') + '</div>' +
+    (readOnly ? '<div class="sub" style="color:var(--amber);">Somente a Diretoria pode alterar ou excluir um lançamento de produção.</div>' : '') +
+    '<div class="field"><label>Produto produzido</label><div class="chip-group" id="pfTpls">' + tpls.map(function(t){
+      return '<div class="chip' + (t.id === tplId ? ' selected' : '') + '" data-pft="' + esc(t.id) + '"' + (readOnly ? ' style="pointer-events:none;"' : '') + '>' + esc(t.name) + '</div>'; }).join("") + '</div></div>' +
+    '<div class="field"><label>Data</label><input type="date" id="pfDate" value="' + (e ? e.date : todayStr()) + '"' + dis + '></div>' +
+    '<div class="field"><label>Peso do produto bruto (kg)*</label><input type="number" inputmode="decimal" min="0" step="any" id="pfRaw" value="' + num(e && e.rawKg) + '" placeholder="Ex: 10,5"' + dis + '></div>' +
+    '<div class="row2"><div class="field"><label>Quantidade de filés (un)*</label><input type="number" inputmode="numeric" min="0" step="1" id="pfQty" value="' + num(e && e.filetQty) + '"' + dis + '></div>' +
+      '<div class="field"><label>Peso dos filés (kg)*</label><input type="number" inputmode="decimal" min="0" step="any" id="pfFil" value="' + num(e && e.filetKg) + '"' + dis + '></div></div>' +
+    '<div class="row2"><div class="field"><label>Peso para iscas (kg)</label><input type="number" inputmode="decimal" min="0" step="any" id="pfIsc" value="' + num(e && e.iscaKg) + '"' + dis + '></div>' +
+      '<div class="field"><label>Peso de descarte (kg)</label><input type="number" inputmode="decimal" min="0" step="any" id="pfDsc" value="' + num(e && e.discardKg) + '"' + dis + '></div></div>' +
+    '<div id="pfCalc" class="item-row" style="font-size:13px;"></div>' +
+    '<div class="field"><label>Observação (opcional)</label><input type="text" id="pfNote" value="' + esc(e && e.note || "") + '" placeholder="Ex: lote, fornecedor, quem porcionou"' + dis + '></div>' +
+    (readOnly ? '' : '<button class="btn btn-primary" id="pfSave">' + (e ? 'Salvar alteração' : 'Salvar produção') + '</button>' + (e ? '<button class="btn btn-secondary" id="pfDel" style="color:var(--red);">Excluir lançamento</button>' : '')) +
+    '<button class="btn btn-secondary" id="pfCancel">' + (readOnly ? 'Fechar' : 'Cancelar') + '</button>';
+  openSheet(html);
+  function val(idn) { var v = parseFloat(document.getElementById(idn).value); return isNaN(v) ? 0 : v; }
+  function calc() {
+    var k = prodCalc({rawKg:val("pfRaw"), filetKg:val("pfFil"), iscaKg:val("pfIsc"), discardKg:val("pfDsc"), filetQty:val("pfQty")});
+    var el = document.getElementById("pfCalc");
+    if (!(k.raw > 0)) { el.innerHTML = '<span style="color:var(--text-2);">Informe o peso bruto para ver o rendimento.</span>'; return; }
+    el.innerHTML = '<div style="display:flex;justify-content:space-between;"><span>Rendimento em filés</span><b style="color:var(--green);">' + fmtPct(k.pFil) + '</b></div>' +
+      '<div style="display:flex;justify-content:space-between;"><span>Iscas</span><b>' + fmtPct(k.pIsc) + '</b></div>' +
+      '<div style="display:flex;justify-content:space-between;"><span>Descarte</span><b style="color:var(--red);">' + fmtPct(k.pDsc) + '</b></div>' +
+      (k.avgG ? '<div style="display:flex;justify-content:space-between;"><span>Peso médio por filé</span><b>' + Math.round(k.avgG) + ' g</b></div>' : '') +
+      '<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:4px;padding-top:4px;"><span>Diferença não registrada</span><b style="color:' + (k.diff < -0.0005 ? 'var(--red)' : (k.diff > 0.0005 ? 'var(--amber)' : 'var(--green)')) + ';">' + fmtKg(k.diff) + ' (' + fmtPct(k.pDiff) + ')</b></div>' +
+      (k.diff < -0.0005 ? '<div style="color:var(--red);font-size:12px;margin-top:4px;">⚠ Filés + iscas + descarte passam do peso bruto. Confira os pesos.</div>' : '');
+  }
+  calc();
+  ["pfRaw","pfQty","pfFil","pfIsc","pfDsc"].forEach(function(i){ document.getElementById(i).addEventListener("input", calc); });
+  document.getElementById("pfCancel").addEventListener("click", closeSheet);
+  if (readOnly) return;
+  sheet.querySelectorAll("[data-pft]").forEach(function(ch){ ch.addEventListener("click", function(){
+    tplId = ch.getAttribute("data-pft"); sheet.querySelectorAll("[data-pft]").forEach(function(x){ x.classList.toggle("selected", x === ch); });
+  }); });
+  document.getElementById("pfSave").addEventListener("click", function(){
+    var t = tpls.filter(function(x){ return x.id === tplId; })[0];
+    var data = { date: document.getElementById("pfDate").value || todayStr(), templateId: tplId, templateName: t ? t.name : tplId,
+      rawKg: val("pfRaw"), filetQty: Math.round(val("pfQty")), filetKg: val("pfFil"), iscaKg: val("pfIsc"), discardKg: val("pfDsc"),
+      note: document.getElementById("pfNote").value.trim() };
+    if (!(data.rawKg > 0)) { showToast("Informe o peso do produto bruto"); return; }
+    if (!(data.filetQty > 0) || !(data.filetKg > 0)) { showToast("Informe a quantidade e o peso dos filés"); return; }
+    if (data.filetKg + data.iscaKg + data.discardKg > data.rawKg + 0.0005 && !window.confirm("Filés + iscas + descarte passam do peso bruto. Salvar mesmo assim?")) return;
+    var btn = document.getElementById("pfSave"); btn.disabled = true; btn.textContent = "Salvando…";
+    var p = e ? db.doc("production/" + e.id).update(Object.assign(data, {editedAt: Date.now(), editedByName: currentEmployeeName}))
+      : db.collection("production").add(Object.assign(data, { storeId: currentStoreId, storeName: stores[currentStoreId].name,
+          employeeId: currentEmployeeId, employeeName: currentEmployeeName, createdAt: Date.now() }));
+    p.then(function(){ closeSheet(); showToast("Produção salva"); prodData = null; renderProducao(); })
+      .catch(function(err){ btn.disabled = false; btn.textContent = "Salvar produção"; showToast("Erro: " + errMsg(err)); });
+  });
+  var bd = document.getElementById("pfDel");
+  if (bd) bd.addEventListener("click", function(){
+    if (!window.confirm("Excluir este lançamento de produção?")) return;
+    db.doc("production/" + e.id).delete().then(function(){ closeSheet(); showToast("Lançamento excluído"); prodData = null; renderProducao(); })
+      .catch(function(err){ showToast("Erro: " + errMsg(err)); });
+  });
+}
+function openProdTemplates() {
+  if (!canManageProd()) return;
+  var items = prodTemplatesList().map(function(t){ return Object.assign({}, t); });
+  function prodOpts(sel) { return '<option value="">— nenhum —</option>' + productOrder.map(function(pid){ return '<option value="' + pid + '"' + (pid === sel ? ' selected' : '') + '>' + esc(products[pid].name) + '</option>'; }).join(""); }
+  function draw() {
+    var h = '<h2>⚙ Modelos de produção</h2><div class="sub">Produtos que podem ser produzidos. Associe, se quiser, os produtos do cadastro (matéria-prima, filé e isca) para consulta.</div>';
+    items.forEach(function(t, i){
+      h += '<div class="item-row"><div class="field" style="margin-bottom:8px;"><label>Nome</label><input type="text" data-tn="' + i + '" value="' + esc(t.name) + '"></div>' +
+        '<div class="field" style="margin-bottom:8px;"><label>Matéria-prima (bruto)</label><select data-tr="' + i + '">' + prodOpts(t.rawProductId) + '</select></div>' +
+        '<div class="row2"><div class="field" style="margin-bottom:8px;"><label>Produto filé</label><select data-tf="' + i + '">' + prodOpts(t.filetProductId) + '</select></div>' +
+        '<div class="field" style="margin-bottom:8px;"><label>Produto isca</label><select data-ti="' + i + '">' + prodOpts(t.iscaProductId) + '</select></div></div>' +
+        (items.length > 1 ? '<button class="link-btn link-danger" data-tdel="' + i + '" type="button">Remover modelo</button>' : '') + '</div>';
+    });
+    h += '<button class="link-btn" id="ptAdd" type="button">+ Novo modelo</button>' +
+      '<button class="btn btn-primary" id="ptSave" style="margin-top:10px;">Salvar modelos</button><button class="btn btn-secondary" id="ptCancel">Cancelar</button>';
+    openSheet(h);
+    function sync() {
+      sheet.querySelectorAll("[data-tn]").forEach(function(x){ items[+x.getAttribute("data-tn")].name = x.value; });
+      sheet.querySelectorAll("[data-tr]").forEach(function(x){ items[+x.getAttribute("data-tr")].rawProductId = x.value; });
+      sheet.querySelectorAll("[data-tf]").forEach(function(x){ items[+x.getAttribute("data-tf")].filetProductId = x.value; });
+      sheet.querySelectorAll("[data-ti]").forEach(function(x){ items[+x.getAttribute("data-ti")].iscaProductId = x.value; });
+    }
+    document.getElementById("ptCancel").addEventListener("click", closeSheet);
+    document.getElementById("ptAdd").addEventListener("click", function(){ sync(); items.push({id:"m" + Date.now().toString(36), name:"", rawProductId:"", filetProductId:"", iscaProductId:""}); draw(); });
+    sheet.querySelectorAll("[data-tdel]").forEach(function(b){ b.addEventListener("click", function(){ sync(); items.splice(+b.getAttribute("data-tdel"), 1); draw(); }); });
+    document.getElementById("ptSave").addEventListener("click", function(){
+      sync();
+      var clean = items.filter(function(t){ return (t.name||"").trim(); }).map(function(t){ return Object.assign(t, {name: t.name.trim()}); });
+      if (!clean.length) { showToast("Mantenha pelo menos um modelo"); return; }
+      db.doc("meta/productionTemplates").set({items: clean, updatedAt: Date.now(), updatedByName: currentEmployeeName})
+        .then(function(){ prodTemplates = {items: clean}; closeSheet(); showToast("Modelos salvos"); renderProducao(); })
+        .catch(function(err){ showToast("Erro: " + errMsg(err)); });
+    });
+  }
+  draw();
+}
+function printProducao() {
+  var r = prodRange(), rows = prodData ? prodData.rows.filter(function(e){ return !prodTpl || e.templateId === prodTpl; }) : [];
+  rows.sort(function(a,b){ return (a.date||"").localeCompare(b.date||"") || (a.createdAt||0) - (b.createdAt||0); });
+  var tot = {raw:0, fil:0, qty:0, isc:0, dsc:0};
+  var h = '<table class="pr-table"><thead><tr><th>Data</th><th>Produto</th><th class="n">Bruto</th><th class="n">Filés</th><th class="n">Peso filés</th><th class="n">Iscas</th><th class="n">Descarte</th><th class="n">Rend.</th><th>Funcionário</th></tr></thead><tbody>';
+  rows.forEach(function(e){
+    var k = prodCalc(e);
+    tot.raw += k.raw; tot.fil += k.fil; tot.qty += e.filetQty||0; tot.isc += k.isc; tot.dsc += k.dsc;
+    h += '<tr><td>' + fmtDateShort(e.date) + '</td><td>' + esc(e.templateName) + '</td><td class="n">' + fmtKg(k.raw) + '</td><td class="n">' + fmtQty(e.filetQty||0) + '</td><td class="n">' + fmtKg(k.fil) + '</td>' +
+      '<td class="n">' + fmtKg(k.isc) + '</td><td class="n">' + fmtKg(k.dsc) + '</td><td class="n">' + fmtPct(k.pFil) + '</td><td>' + esc(e.employeeName||"") + '</td></tr>';
+  });
+  var tc = prodCalc({rawKg:tot.raw, filetKg:tot.fil, iscaKg:tot.isc, discardKg:tot.dsc, filetQty:tot.qty});
+  h += '<tr class="pr-sub"><td colspan="2">Total</td><td class="n">' + fmtKg(tot.raw) + '</td><td class="n">' + fmtQty(tot.qty) + '</td><td class="n">' + fmtKg(tot.fil) + '</td><td class="n">' + fmtKg(tot.isc) + '</td><td class="n">' + fmtKg(tot.dsc) + '</td><td class="n">' + fmtPct(tc.pFil) + '</td><td></td></tr></tbody></table>' +
+    '<div>Iscas: ' + fmtPct(tc.pIsc) + ' · Descarte: ' + fmtPct(tc.pDsc) + ' · Diferença não registrada: ' + fmtKg(tc.diff) + ' (' + fmtPct(tc.pDiff) + ')' + (tc.avgG ? ' · Peso médio do filé: ' + Math.round(tc.avgG) + ' g' : '') + '</div>';
+  var tn = prodTpl ? (prodTemplatesList().filter(function(t){ return t.id === prodTpl; })[0] || {}).name : "Todos";
+  openPrintPreview("Produção — " + stores[currentStoreId].name, ["Loja: " + stores[currentStoreId].name, "Período: " + r.label, "Produto: " + tn], h);
 }
 function renderPainel() {
   var storeId = currentStoreId;
@@ -4540,6 +4774,9 @@ function subscribeScoped(route) {
       scopedShipmentsOrigin = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
       if (currentRoute==="vendas") renderRoute();
     }));
+  } else if (route === "producao") {
+    prodData = null;
+    renderRoute();
   } else if (route === "geladeira") {
     subscribeFridge(storeId);
   } else if (route === "tarefas") {
