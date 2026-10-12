@@ -4615,8 +4615,8 @@ function buildFridgeReport(r, docs, allStores) {
       grand.daysWith++;
       dayHtml += '<div class="pr-sub" style="margin-top:14px;">' + fmtWeekdayBr(dd) + ', ' + fmtDayBr(dd) + '</div>';
       if (!rowsHtml) { dayHtml += '<div class="pr-muted">Registro aberto, mas sem quantidades lançadas.</div>'; return; }
-      dayHtml += '<table class="pr-table"><thead><tr><th>Bebida</th><th class="n">Almoço</th><th class="n">Jantar</th><th class="n">Abastecido</th><th class="n">Contagem final</th><th class="n">Saída</th></tr></thead><tbody>' + rowsHtml +
-        '<tr class="pr-total"><td>Total do dia</td><td class="n">' + fmtQty(dt.lunch) + '</td><td class="n">' + fmtQty(dt.dinner) + '</td><td class="n">' + fmtQty(dt.ab) + '</td><td class="n">' + (dt.finN ? fmtQty(dt.fin) : '—') + '</td><td class="n">' + (dt.saidN ? fmtQty(dt.said) : '—') + '</td></tr></tbody></table>';
+      dayHtml += '<div style="overflow-x:auto;"><table class="pr-table"><thead><tr><th>Bebida</th><th class="n">Almoço</th><th class="n">Jantar</th><th class="n">Abastecido</th><th class="n">Contagem final</th><th class="n">Saída</th></tr></thead><tbody>' + rowsHtml +
+        '<tr class="pr-total"><td>Total do dia</td><td class="n">' + fmtQty(dt.lunch) + '</td><td class="n">' + fmtQty(dt.dinner) + '</td><td class="n">' + fmtQty(dt.ab) + '</td><td class="n">' + (dt.finN ? fmtQty(dt.fin) : '—') + '</td><td class="n">' + (dt.saidN ? fmtQty(dt.said) : '—') + '</td></tr></tbody></table></div>';
       var info = [];
       if (Object.keys(who).length) info.push("Lançado por: " + Object.keys(who).join(", "));
       if (doc.notes) info.push("Obs.: " + doc.notes);
@@ -4631,14 +4631,14 @@ function buildFridgeReport(r, docs, allStores) {
       '<div><span>Total abastecido</span><b>' + fmtQty(st.ab) + '</b></div><div><span>Saída total</span><b>' + (st.saidKnown ? fmtQty(st.said) : '—') + '</b></div></div>';
     if (missing.length) body += '<div class="pr-warn">Dias sem lançamento: ' + esc(missing.join(", ")) + '</div>';
     if (sumRows.length) {
-      body += '<div class="pr-sub">Resumo do período por bebida</div><table class="pr-table"><thead><tr><th>Bebida</th><th class="n">Almoço</th><th class="n">Jantar</th><th class="n">Abastecido</th><th class="n">Saída</th><th class="n">Média/dia</th><th class="n">Última sobra</th></tr></thead><tbody>';
+      body += '<div class="pr-sub">Resumo do período por bebida</div><div style="overflow-x:auto;"><table class="pr-table"><thead><tr><th>Bebida</th><th class="n">Almoço</th><th class="n">Jantar</th><th class="n">Abastecido</th><th class="n">Saída</th><th class="n">Média/dia</th><th class="n">Última sobra</th></tr></thead><tbody>';
       var tl = 0, td = 0, ta = 0, ts = 0;
       sumRows.sort(function(a, b){ return sum[b.id].said - sum[a.id].said; }).forEach(function(it){
         var S = sum[it.id]; tl += S.lunch; td += S.dinner; ta += S.ab; ts += S.said;
         body += '<tr><td>' + esc(it.name) + '</td><td class="n">' + fmtQty(S.lunch) + '</td><td class="n">' + fmtQty(S.dinner) + '</td><td class="n"><b>' + fmtQty(S.ab) + '</b></td>' +
           '<td class="n"><b>' + (S.saidDays ? fmtQty(S.said) : '—') + '</b></td><td class="n">' + (S.saidDays ? fmtQty(Math.round(S.said / S.saidDays * 10) / 10) : '—') + '</td><td class="n">' + q(S.lastFin) + '</td></tr>';
       });
-      body += '<tr class="pr-total"><td>Total</td><td class="n">' + fmtQty(tl) + '</td><td class="n">' + fmtQty(td) + '</td><td class="n">' + fmtQty(ta) + '</td><td class="n">' + fmtQty(ts) + '</td><td></td><td></td></tr></tbody></table>';
+      body += '<tr class="pr-total"><td>Total</td><td class="n">' + fmtQty(tl) + '</td><td class="n">' + fmtQty(td) + '</td><td class="n">' + fmtQty(ta) + '</td><td class="n">' + fmtQty(ts) + '</td><td></td><td></td></tr></tbody></table></div>';
       body += '<div class="pr-muted" style="margin-top:3px;">Ordenado pela maior saída. Saída = sobra do dia anterior + abastecido − contagem final. Média/dia considera só os dias em que a saída pôde ser calculada.</div>';
       body += '<div class="pr-sub" style="margin-top:16px;">Lançamentos dia a dia</div>' + dayHtml;
     } else {
