@@ -275,6 +275,15 @@
     .toast { left:calc(50% + 125px); }
   }
   @keyframes popIn { from{transform:scale(.97);opacity:0;} to{transform:scale(1);opacity:1;} }
+#printArea .pr-h2 { font-size: 16px; margin: 18px 0 6px 0; padding-bottom: 4px; border-bottom: 2px solid #1f6f43; color: #1f6f43; }
+#printArea .pr-kpis { display: flex; gap: 10px; margin: 6px 0 8px 0; flex-wrap: wrap; }
+#printArea .pr-kpis > div { border: 1px solid #d9dce1; border-radius: 8px; padding: 6px 10px; min-width: 120px; }
+#printArea .pr-kpis span { display: block; font-size: 10.5px; color: #5b5f66; }
+#printArea .pr-kpis b { font-size: 16px; }
+#printArea .pr-warn { background: #fff4d6; border: 1px solid #e8b931; border-radius: 6px; padding: 5px 8px; font-size: 11.5px; margin-bottom: 8px; }
+#printArea .pr-muted { color: #5b5f66; font-size: 11px; }
+#printArea div.pr-sub { font-weight: 700; font-size: 13px; margin: 10px 0 4px 0; }
+#printArea .pr-total td { font-weight: 800; background: #f2f4f6; }
 </style>
 </head>
 <body class="locked">
@@ -4351,8 +4360,9 @@ function renderGeladeira() {
 
   var editable = fridgeEditable();
   var items = fridgeItems();
-  var html = '<div class="section-head"><h2>🧊 Contagem de geladeira</h2>' +
-    (canManageFridge() ? '<button class="link-btn" id="fgEditList">✏️ Editar lista</button>' : '') + '</div>';
+  var html = '<div class="section-head"><h2>🧊 Contagem de geladeira</h2><div style="display:flex;gap:14px;">' +
+    '<button class="link-btn" id="fgReport">📄 Relatório</button>' +
+    (canManageFridge() ? '<button class="link-btn" id="fgEditList">✏️ Editar lista</button>' : '') + '</div></div>';
   html += '<div class="row2"><div class="field" style="margin-bottom:8px;"><label>Data</label><input type="date" id="fgDate" value="' + fridgeDate + '"' +
     (canManageFridge() ? '' : ' max="' + todayStr() + '"') + '></div>' +
     '<div class="field" style="margin-bottom:8px;"><label>Loja</label><input type="text" value="' + esc(stores[currentStoreId] ? stores[currentStoreId].name : "") + '" disabled></div></div>';
@@ -4416,6 +4426,8 @@ function bindGeladeira() {
   });
   var el = document.getElementById("fgEditList");
   if (el) el.addEventListener("click", openFridgeListEditor);
+  var fr = document.getElementById("fgReport");
+  if (fr) fr.addEventListener("click", openFridgeReport);
   content.querySelectorAll(".fgInp[data-fid]").forEach(function(inp){
     inp.addEventListener("input", function(){
       var id = inp.getAttribute("data-fid"), f = inp.getAttribute("data-ff");
@@ -4492,6 +4504,150 @@ function saveFridgeFields(patch) {
     fridgeSaving--; setFridgeStatus("⚠️ Não foi possível salvar: " + errMsg(err));
     showToast("Erro ao salvar contagem: " + errMsg(err));
   });
+}
+
+// ---------- Relatório da contagem de geladeira ----------
+var fridgeRep = { mode: "7d", from: "", to: "", all: false };
+function fridgeRepCanAll() { var r = currentRole(); return r === "Gerência" || r === "Diretoria" || r === "Operador de Estoque"; }
+function fridgeRepRange() {
+  var s = fridgeRep, t = todayStr(), d;
+  if (s.mode === "hoje") return {from: t, to: t, label: "Hoje (" + fmtDayBr(t) + ")"};
+  if (s.mode === "ontem") { d = prevDateStr(t); return {from: d, to: d, label: "Ontem (" + fmtDayBr(d) + ")"}; }
+  if (s.mode === "mes") { d = t.slice(0, 8) + "01"; return {from: d, to: t, label: "Este mês (" + fmtDayBr(d) + " a " + fmtDayBr(t) + ")"}; }
+  if (s.mode === "periodo") {
+    var a = s.from || t, b = s.to || t; if (a > b) { var x = a; a = b; b = x; }
+    return {from: a, to: b, label: fmtDayBr(a) + " a " + fmtDayBr(b)};
+  }
+  var x7 = dateFromStr(t); x7.setDate(x7.getDate() - 6); d = ymd(x7);
+  return {from: d, to: t, label: "Últimos 7 dias (" + fmtDayBr(d) + " a " + fmtDayBr(t) + ")"};
+}
+function fmtDayBr(ds) { var p = String(ds || "").split("-"); return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : ds; }
+function fmtWeekdayBr(ds) { return ["dom","seg","ter","qua","qui","sex","sáb"][dateFromStr(ds).getDay()]; }
+
+function openFridgeReport() {
+  var s = fridgeRep, t = todayStr();
+  if (!s.from) { var x = dateFromStr(t); x.setDate(x.getDate() - 6); s.from = ymd(x); s.to = t; }
+  var modes = [["hoje","Hoje"],["ontem","Ontem"],["7d","Últimos 7 dias"],["mes","Este mês"],["periodo","Escolher datas"]];
+  var html = '<h2>📄 Relatório da geladeira</h2><div class="sub">Resumo do que foi abastecido, da contagem final e da saída de cada bebida no período.</div>' +
+    '<div class="field"><label>Período</label><div class="chip-group" id="frModes">' +
+      modes.map(function(m){ return '<div class="chip' + (s.mode === m[0] ? ' selected' : '') + '" data-frm="' + m[0] + '">' + m[1] + '</div>'; }).join("") + '</div></div>' +
+    '<div class="row2" id="frDates" style="' + (s.mode === "periodo" ? '' : 'display:none;') + '">' +
+      '<div class="field"><label>De</label><input type="date" id="frFrom" value="' + s.from + '"></div>' +
+      '<div class="field"><label>Até</label><input type="date" id="frTo" value="' + s.to + '"></div></div>';
+  if (fridgeRepCanAll()) {
+    html += '<div class="field"><label>Lojas</label><div class="chip-group" id="frStores">' +
+      '<div class="chip' + (!s.all ? ' selected' : '') + '" data-fra="0">' + esc(stores[currentStoreId] ? stores[currentStoreId].name : "Loja atual") + '</div>' +
+      '<div class="chip' + (s.all ? ' selected' : '') + '" data-fra="1">Todas as lojas</div></div></div>';
+  }
+  html += '<button class="btn btn-primary" id="frGo">Gerar relatório</button><button class="btn btn-secondary" id="frCancel">Cancelar</button>';
+  openSheet(html);
+  sheet.querySelectorAll("[data-frm]").forEach(function(ch){ ch.addEventListener("click", function(){
+    s.mode = ch.getAttribute("data-frm");
+    sheet.querySelectorAll("[data-frm]").forEach(function(o){ o.classList.toggle("selected", o === ch); });
+    document.getElementById("frDates").style.display = s.mode === "periodo" ? "" : "none";
+  }); });
+  sheet.querySelectorAll("[data-fra]").forEach(function(ch){ ch.addEventListener("click", function(){
+    s.all = ch.getAttribute("data-fra") === "1";
+    sheet.querySelectorAll("[data-fra]").forEach(function(o){ o.classList.toggle("selected", o === ch); });
+  }); });
+  document.getElementById("frCancel").addEventListener("click", closeSheet);
+  document.getElementById("frGo").addEventListener("click", function(){
+    s.from = document.getElementById("frFrom").value || s.from;
+    s.to = document.getElementById("frTo").value || s.to;
+    var r = fridgeRepRange();
+    var nd = Math.round((dateFromStr(r.to) - dateFromStr(r.from)) / 86400000) + 1;
+    if (nd > 93) { showToast("Escolha um período de até 3 meses"); return; }
+    var btn = document.getElementById("frGo"); btn.disabled = true; btn.textContent = "Buscando lançamentos…";
+    var q = db.collection("fridge");
+    if (!(s.all && fridgeRepCanAll())) q = q.where("storeId", "==", currentStoreId);
+    // busca também o dia anterior ao início, para calcular a saída do primeiro dia
+    q.where("date", ">=", prevDateStr(r.from)).where("date", "<=", r.to).get().then(function(qs){
+      closeSheet();
+      buildFridgeReport(r, qs.docs.map(function(d){ return d.data(); }), s.all && fridgeRepCanAll());
+    }).catch(function(err){ btn.disabled = false; btn.textContent = "Gerar relatório"; showToast("Não foi possível buscar: " + errMsg(err)); });
+  });
+}
+
+function buildFridgeReport(r, docs, allStores) {
+  // índice loja -> data -> documento
+  var byStore = {};
+  docs.forEach(function(d){ if (!d || !d.storeId || !d.date) return; (byStore[d.storeId] = byStore[d.storeId] || {})[d.date] = d; });
+  var days = []; for (var x = dateFromStr(r.from); ymd(x) <= r.to; x.setDate(x.getDate() + 1)) days.push(ymd(x));
+  var sids = allStores ? storeOrder.filter(function(sid){ return stores[sid] && byStore[sid]; }) : [currentStoreId];
+  Object.keys(byStore).forEach(function(sid){ if (allStores && sids.indexOf(sid) === -1) sids.push(sid); });
+  var cfgItems = fridgeItems();
+  function n(v) { return numOrNull(v); }
+  function q(v) { return v === null || v === undefined ? "—" : fmtQty(v); }
+  var body = "", grand = {ab: 0, said: 0, daysWith: 0};
+
+  sids.forEach(function(sid){
+    var sd = byStore[sid] || {}, sname = stores[sid] ? stores[sid].name : ((Object.values(sd)[0] || {}).storeName || sid);
+    // itens: os da lista atual + os que aparecem nos lançamentos (itens removidos depois)
+    var items = cfgItems.map(function(it){ return {id: it.id, name: it.name}; }), seen = {};
+    items.forEach(function(it){ seen[it.id] = 1; });
+    days.forEach(function(dd){ var doc = sd[dd]; if (!doc) return;
+      Object.keys(doc).forEach(function(k){ if (k.indexOf("r_") === 0) { var id = k.slice(2); if (!seen[id]) { seen[id] = 1; items.push({id: id, name: doc[k].name || id}); } } });
+    });
+    var sum = {}; items.forEach(function(it){ sum[it.id] = {lunch: 0, dinner: 0, ab: 0, said: 0, saidDays: 0, lastFin: null}; });
+    var dayHtml = "", missing = [], st = {ab: 0, said: 0, saidKnown: 0};
+    days.forEach(function(dd){
+      var doc = sd[dd], prev = sd[prevDateStr(dd)];
+      if (!doc) { missing.push(fmtDayBr(dd).slice(0, 5)); return; }
+      var rowsHtml = "", dt = {lunch: 0, dinner: 0, ab: 0, fin: 0, finN: 0, said: 0, saidN: 0}, who = {};
+      items.forEach(function(it){
+        var row = doc["r_" + it.id]; if (!row) return;
+        var lq = n(row.lunchQty), dq = n(row.dinnerQty), fin = n(row.finalCount);
+        if (lq === null && dq === null && fin === null) return;
+        var ab = (lq || 0) + (dq || 0);
+        var pr = prev && prev["r_" + it.id], pf = pr ? n(pr.finalCount) : null;
+        var said = (fin !== null && pf !== null) ? pf + ab - fin : null;
+        var S = sum[it.id];
+        S.lunch += lq || 0; S.dinner += dq || 0; S.ab += ab; if (said !== null) { S.said += said; S.saidDays++; } if (fin !== null) S.lastFin = fin;
+        dt.lunch += lq || 0; dt.dinner += dq || 0; dt.ab += ab; if (fin !== null) { dt.fin += fin; dt.finN++; } if (said !== null) { dt.said += said; dt.saidN++; }
+        if (row.by) who[row.by] = 1;
+        rowsHtml += '<tr><td>' + esc(it.name) + '</td>' +
+          '<td class="n">' + q(lq) + (row.lunchTime ? ' <span class="pr-muted">' + esc(row.lunchTime) + '</span>' : '') + '</td>' +
+          '<td class="n">' + q(dq) + (row.dinnerTime ? ' <span class="pr-muted">' + esc(row.dinnerTime) + '</span>' : '') + '</td>' +
+          '<td class="n"><b>' + fmtQty(ab) + '</b></td><td class="n">' + q(fin) + '</td>' +
+          '<td class="n"' + (said !== null && said < 0 ? ' style="color:#b42318;"' : '') + '><b>' + (said !== null ? fmtQty(said) : (fin === null ? '—' : 's/ sobra ant.')) + '</b></td></tr>';
+      });
+      st.ab += dt.ab; if (dt.saidN) { st.said += dt.said; st.saidKnown++; }
+      grand.daysWith++;
+      dayHtml += '<div class="pr-sub" style="margin-top:14px;">' + fmtWeekdayBr(dd) + ', ' + fmtDayBr(dd) + '</div>';
+      if (!rowsHtml) { dayHtml += '<div class="pr-muted">Registro aberto, mas sem quantidades lançadas.</div>'; return; }
+      dayHtml += '<table class="pr-table"><thead><tr><th>Bebida</th><th class="n">Almoço</th><th class="n">Jantar</th><th class="n">Abastecido</th><th class="n">Contagem final</th><th class="n">Saída</th></tr></thead><tbody>' + rowsHtml +
+        '<tr class="pr-total"><td>Total do dia</td><td class="n">' + fmtQty(dt.lunch) + '</td><td class="n">' + fmtQty(dt.dinner) + '</td><td class="n">' + fmtQty(dt.ab) + '</td><td class="n">' + (dt.finN ? fmtQty(dt.fin) : '—') + '</td><td class="n">' + (dt.saidN ? fmtQty(dt.said) : '—') + '</td></tr></tbody></table>';
+      var info = [];
+      if (Object.keys(who).length) info.push("Lançado por: " + Object.keys(who).join(", "));
+      if (doc.notes) info.push("Obs.: " + doc.notes);
+      if (info.length) dayHtml += '<div class="pr-muted" style="margin-top:4px;">' + info.map(esc).join(" · ") + '</div>';
+    });
+    grand.ab += st.ab; grand.said += st.said;
+
+    // resumo do período por bebida
+    var sumRows = items.filter(function(it){ var S = sum[it.id]; return S.ab || S.saidDays || S.lastFin !== null; });
+    body += '<h2 class="pr-h2">' + esc(sname) + '</h2>';
+    body += '<div class="pr-kpis"><div><span>Dias com lançamento</span><b>' + (days.length - missing.length) + ' de ' + days.length + '</b></div>' +
+      '<div><span>Total abastecido</span><b>' + fmtQty(st.ab) + '</b></div><div><span>Saída total</span><b>' + (st.saidKnown ? fmtQty(st.said) : '—') + '</b></div></div>';
+    if (missing.length) body += '<div class="pr-warn">Dias sem lançamento: ' + esc(missing.join(", ")) + '</div>';
+    if (sumRows.length) {
+      body += '<div class="pr-sub">Resumo do período por bebida</div><table class="pr-table"><thead><tr><th>Bebida</th><th class="n">Almoço</th><th class="n">Jantar</th><th class="n">Abastecido</th><th class="n">Saída</th><th class="n">Média/dia</th><th class="n">Última sobra</th></tr></thead><tbody>';
+      var tl = 0, td = 0, ta = 0, ts = 0;
+      sumRows.sort(function(a, b){ return sum[b.id].said - sum[a.id].said; }).forEach(function(it){
+        var S = sum[it.id]; tl += S.lunch; td += S.dinner; ta += S.ab; ts += S.said;
+        body += '<tr><td>' + esc(it.name) + '</td><td class="n">' + fmtQty(S.lunch) + '</td><td class="n">' + fmtQty(S.dinner) + '</td><td class="n"><b>' + fmtQty(S.ab) + '</b></td>' +
+          '<td class="n"><b>' + (S.saidDays ? fmtQty(S.said) : '—') + '</b></td><td class="n">' + (S.saidDays ? fmtQty(Math.round(S.said / S.saidDays * 10) / 10) : '—') + '</td><td class="n">' + q(S.lastFin) + '</td></tr>';
+      });
+      body += '<tr class="pr-total"><td>Total</td><td class="n">' + fmtQty(tl) + '</td><td class="n">' + fmtQty(td) + '</td><td class="n">' + fmtQty(ta) + '</td><td class="n">' + fmtQty(ts) + '</td><td></td><td></td></tr></tbody></table>';
+      body += '<div class="pr-muted" style="margin-top:3px;">Ordenado pela maior saída. Saída = sobra do dia anterior + abastecido − contagem final. Média/dia considera só os dias em que a saída pôde ser calculada.</div>';
+      body += '<div class="pr-sub" style="margin-top:16px;">Lançamentos dia a dia</div>' + dayHtml;
+    } else {
+      body += '<div class="pr-muted">Nenhum lançamento de geladeira no período.</div>';
+    }
+  });
+  if (!sids.length) body = '<div class="pr-muted">Nenhum lançamento de geladeira no período.</div>';
+  var title = "Contagem de geladeira — " + (allStores ? "Todas as lojas" : (stores[currentStoreId] ? stores[currentStoreId].name : ""));
+  openPrintPreview(title, ["Período: " + r.label, allStores ? "Lojas: " + (sids.map(function(s){ return stores[s] ? stores[s].name : s; }).join(", ") || "—") : ""], body);
 }
 
 function openFridgeListEditor() {
