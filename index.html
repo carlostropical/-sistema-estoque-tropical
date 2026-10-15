@@ -307,6 +307,30 @@
 .rr-opt:last-child { border-bottom:none; } .rr-opt small { color:var(--text-2); white-space:nowrap; }
 .rr-opt.on { background:var(--accent-2); }
 .rr-sel { padding:10px 12px; border-radius:10px; background:var(--accent-2); margin:-6px 0 12px 0; font-size:14px; }
+.topic-intro { font-size:15px; margin:2px 0 6px 0; } .topic-intro span { display:block; font-size:12.5px; color:var(--text-2); margin-top:2px; }
+.topic-group { font-size:11.5px; font-weight:800; letter-spacing:.6px; text-transform:uppercase; color:var(--text-2); margin:16px 0 8px 2px; }
+.topic-grid { display:grid; grid-template-columns:1fr; gap:8px; }
+@media (min-width: 700px) { .topic-grid { grid-template-columns:1fr 1fr; } }
+.topic-card { display:flex; align-items:center; gap:12px; width:100%; text-align:left; padding:14px; border-radius:14px; border:1px solid var(--border); background:var(--surface); color:var(--text); font:inherit; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+.topic-card:active { background:var(--surface-2); }
+.topic-card .tc-ic { font-size:24px; width:42px; height:42px; border-radius:12px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; flex:none; }
+.topic-card.tc-prod .tc-ic { background:#e7f3ec; } .topic-card.tc-raw .tc-ic { background:#fdf0e3; }
+.topic-card .tc-body { flex:1; min-width:0; }
+.topic-card b { display:block; font-size:15px; line-height:1.25; }
+.topic-card small { display:block; font-size:12.5px; color:var(--text-2); margin-top:2px; line-height:1.3; }
+.topic-card em { display:block; font-style:normal; font-size:12px; font-weight:700; color:var(--accent); margin-top:5px; }
+.topic-card .tc-warn { color:var(--amber); }
+.topic-card .tc-go { font-size:24px; color:var(--text-2); flex:none; }
+.topic-back { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.topic-title { font-size:20px; margin:4px 0 4px 0; }
+.topic-desc { font-size:13px; color:var(--text-2); margin-bottom:14px; line-height:1.4; }
+.topic-sub { font-size:13px; font-weight:800; margin:16px 0 6px 0; } .topic-sub span { color:var(--text-2); font-weight:500; }
+.topic-row { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:11px 12px; border:1px solid var(--border); border-radius:10px; background:var(--surface); margin-bottom:6px; cursor:pointer; font-size:14px; }
+.topic-row.static { cursor:default; }
+.topic-row small { display:block; font-size:11.5px; color:var(--text-2); font-weight:500; }
+.topic-row > b { white-space:nowrap; text-align:right; } .topic-row > b small { display:inline; }
+.topic-row > b.zero { color:var(--text-2); font-weight:500; } .topic-row > b.pos { color:var(--green); }
+.topic-empty { font-size:13px; color:var(--text-2); padding:6px 2px; }
 </style>
 </head>
 <body class="locked">
@@ -572,6 +596,7 @@ drawerOverlay.addEventListener("click", closeDrawer);
 function navigate(route) {
   estoqueAllMode = false;
   estoqueMovMode = false;
+  estoqueView = "";
   currentRoute = route;
   syncDrawer();
   var r = ROUTES[route];
@@ -1246,11 +1271,138 @@ function openRawReceiveForm(keepSupplier) {
       })
       .then(function(){
         rawRecvSession.push({storeId: currentStoreId, day: today, name: p.name, qty: q, unit: p.unit || "un", sup: sup, by: currentEmployeeName || "", time: nowTimeStr()});
+        rawRecent = null; rawRecentKey = "";
         showToast("✓ " + p.name + ": +" + fmtQty(q) + " " + (p.unit || "un") + " recebido");
         openRawReceiveForm(sup);
       })
       .catch(function(err){ btn.disabled = false; btn.textContent = "✓ Confirmar recebimento deste item"; showToast("Erro ao salvar: " + errMsg(err)); });
   });
+}
+
+// ============================================================
+// ESTOQUE EM TÓPICOS
+// ============================================================
+var estoqueView = "", rawRecent = null, rawRecentKey = "", rawRecentLoading = false;
+function topicHeader(title, desc, right) {
+  return '<div class="topic-back"><button class="link-btn" id="bTopicBack">← Tópicos do estoque</button>' + (right || '') + '</div>' +
+    '<h2 class="topic-title">' + title + '</h2>' + (desc ? '<div class="topic-desc">' + desc + '</div>' : '');
+}
+function bindTopicBack() {
+  var b = document.getElementById("bTopicBack");
+  if (b) b.addEventListener("click", function(){ estoqueView = ""; searchTerm = ""; renderEstoque(); window.scrollTo(0, 0); });
+}
+function openEstoqueTopic(v) {
+  if (v === "movs") { estoqueMovMode = true; movSearch = ""; renderStoreMovs(); window.scrollTo(0, 0); return; }
+  if (v === "todas") { estoqueAllMode = true; allStock = null; storeSelect.style.display = "none"; renderAllStoresStock(); loadAllStock(); window.scrollTo(0, 0); return; }
+  if (v === "pdf") { searchTerm = ""; estoqueCatFilter = ""; printEstoque(); return; }
+  estoqueView = v; searchTerm = ""; renderEstoque(); window.scrollTo(0, 0);
+}
+function renderEstoqueHub() {
+  var role = currentRole(), canCount = COUNT_ROLES.indexOf(role) !== -1;
+  var ids = storeProductOrder(currentStoreId);
+  var withStock = 0, low = 0, nProd = 0, nRaw = 0;
+  ids.forEach(function(pid){
+    var p = products[pid], q = scopedStock[pid] ? scopedStock[pid].quantity : 0;
+    if (q > 0) withStock++;
+    if (typeof p.minStock === "number" && p.minStock > 0 && q <= p.minStock) low++;
+    if (p.prodType === "produzido") nProd++; else if (p.prodType === "bruto") nRaw++;
+  });
+  var lastFull = scopedCounts.filter(function(x){ return !x.partial; })[0];
+  var lastProd = scopedCounts.filter(function(x){ return x.kind === "produzido"; })[0];
+  var sname = stores[currentStoreId] ? stores[currentStoreId].name : "";
+  function card(v, ic, title, desc, stat, cls) {
+    return '<button class="topic-card' + (cls ? ' ' + cls : '') + '" data-topic="' + v + '"><span class="tc-ic">' + ic + '</span><span class="tc-body"><b>' + title + '</b><small>' + desc + '</small>' +
+      (stat ? '<em>' + stat + '</em>' : '') + '</span><span class="tc-go">›</span></button>';
+  }
+  var html = '<div class="topic-intro">📦 Estoque · <b>' + esc(sname) + '</b><span>Escolha o que você quer fazer.</span></div>';
+  html += '<div class="topic-group">Consultar</div><div class="topic-grid">' +
+    card("saldo", "📦", "Saldo do estoque", "Quanto há de cada produto. Entrada, saída e perda.", ids.length + " produtos · " + withStock + " com estoque" + (low ? ' · <span class="tc-warn">' + low + ' abaixo do mínimo</span>' : '')) +
+    card("movs", "📒", "Lançamentos por data", "Entradas, saídas, perdas e ajustes por dia, semana ou mês.", "") +
+    (ALL_STOCK_ROLES.indexOf(role) !== -1 ? card("todas", "🏬", "Estoque de todas as lojas", "Tabela com uma coluna por loja.", "") : '') +
+    card("pdf", "📄", "Resumo em PDF", "Saldo de todos os produtos desta loja para enviar.", "") + '</div>';
+  html += '<div class="topic-group">Lançar</div><div class="topic-grid">' +
+    (canCount ? card("contagem", "📋", "Contagem de estoque", "Contagem completa da loja, por gênero.", "Última completa: " + (lastFull ? fmtDateShort(lastFull.date) : "nenhuma")) : '') +
+    (canCount ? card("produzido", "🔪", "Contagem de estoque produzido", "Itens já porcionados e prontos na base.", nProd + " itens · última: " + (lastProd ? fmtDateShort(lastProd.date) : "nenhuma"), "tc-prod") : '') +
+    card("bruto", "📥", "Recebimento de mercadoria não produzida", "Mercadoria que chega bruta, por kg: coxão mole, frango…", nRaw + " itens cadastrados", "tc-raw") + '</div>';
+  content.innerHTML = html;
+  content.querySelectorAll("[data-topic]").forEach(function(b){ b.addEventListener("click", function(){ openEstoqueTopic(b.getAttribute("data-topic")); }); });
+}
+function topicItemList(pids) {
+  var groups = {}, order = [];
+  pids.forEach(function(pid){ var p = products[pid], k = (p.categoryId && categories[p.categoryId]) ? p.categoryId : "_none"; if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(p); });
+  order.sort(function(a,b){ var na = a==="_none" ? "zzz" : categories[a].name, nb = b==="_none" ? "zzz" : categories[b].name; return na.localeCompare(nb, "pt-BR"); });
+  var h = '';
+  order.forEach(function(k){
+    h += '<div class="topic-sub">' + esc(k === "_none" ? "Sem gênero" : categories[k].name) + ' <span>(' + groups[k].length + ')</span></div>';
+    groups[k].sort(function(a,b){ return (a.name||"").localeCompare(b.name||"", "pt-BR"); }).forEach(function(p){
+      var q = scopedStock[p.id] ? scopedStock[p.id].quantity : 0;
+      h += '<div class="topic-row" data-open="' + esc(p.id) + '"><span>' + esc(p.name) + '</span><b' + (q > 0 ? '' : ' class="zero"') + '>' + fmtQty(q) + ' <small>' + esc(p.unit || "un") + '</small></b></div>';
+    });
+  });
+  return h;
+}
+function bindTopicRows() {
+  content.querySelectorAll(".topic-row[data-open]").forEach(function(r){ r.addEventListener("click", function(){ openProductStockDetail(r.getAttribute("data-open")); }); });
+}
+function renderCountTopic() {
+  var counts = scopedCounts.filter(function(x){ return x.kind !== "produzido"; }).slice(0, 10), money = canSeeCmv();
+  var html = topicHeader("📋 Contagem de estoque", "Conferência física da loja. O campo já vem com o saldo do sistema; altere só o que for diferente. Dá para salvar por gênero e terminar depois.");
+  html += '<button class="btn btn-primary" id="bTopicStart">📋 Iniciar contagem</button>';
+  html += '<div class="topic-sub">Últimas contagens</div>';
+  if (!counts.length) html += '<div class="topic-empty">Nenhuma contagem ainda.</div>';
+  counts.forEach(function(x){
+    html += '<div class="topic-row static"><span><b>' + fmtDateShort(x.date) + '</b> · ' + (x.partial ? 'parcial: ' + esc(x.categoryName || "") : 'completa') +
+      '<small>' + esc(x.employeeName || "") + ' · ' + (x.adjustments ? x.adjustments + ' ajuste(s)' : 'sem diferenças') + '</small></span>' + (money && !x.partial ? '<b>' + fmtMoney(x.totalValue || 0) + '</b>' : '') + '</div>';
+  });
+  content.innerHTML = html;
+  bindTopicBack();
+  document.getElementById("bTopicStart").addEventListener("click", function(){ openCountForm(); });
+}
+function loadRawRecent() {
+  var key = currentStoreId;
+  if (rawRecentLoading) return;
+  rawRecentLoading = true;
+  var since = Date.now() - 7 * 86400000;
+  db.collection("movements").where("storeId", "==", key).where("kind", "==", "recebimento_bruto").where("timestamp", ">=", since).get()
+    .then(function(qs){
+      rawRecent = qs.docs.map(function(d){ return d.data(); }).sort(function(a,b){ return (b.timestamp||0) - (a.timestamp||0); });
+      rawRecentKey = key; rawRecentLoading = false;
+      if (currentRoute === "estoque" && estoqueView === "bruto") renderKindTopic("bruto");
+    }).catch(function(){ rawRecent = []; rawRecentKey = key; rawRecentLoading = false; });
+}
+function renderKindTopic(kind) {
+  var pids = storeProductOrder(currentStoreId).filter(function(pid){ return products[pid].prodType === kind; });
+  var html;
+  if (kind === "produzido") {
+    var last = scopedCounts.filter(function(x){ return x.kind === "produzido"; }).slice(0, 5);
+    html = topicHeader("🔪 Contagem de estoque produzido", "Itens já porcionados e prontos na base. Confira e mantenha como está; se algo for diferente, corrija na contagem.");
+    if (pids.length) html += '<button class="btn btn-primary" id="bTopicStart">🔪 Iniciar contagem do produzido</button>';
+    if (last.length) {
+      html += '<div class="topic-sub">Últimas contagens do produzido</div>';
+      last.forEach(function(x){ html += '<div class="topic-row static"><span><b>' + fmtDateShort(x.date) + '</b><small>' + esc(x.employeeName || "") + '</small></span><b>' + (x.adjustments ? x.adjustments + ' ajuste(s)' : 'sem diferenças') + '</b></div>'; });
+    }
+  } else {
+    html = topicHeader("📥 Recebimento de mercadoria não produzida", "Lance um item por vez, conforme a mercadoria chega (por kg). Cada lançamento entra no estoque da loja.");
+    if (pids.length) html += '<button class="btn btn-entrada" id="bTopicStart">📥 Receber mercadoria</button>';
+    if (rawRecentKey !== currentStoreId || !rawRecent) { if (!rawRecentLoading) loadRawRecent(); }
+    html += '<div class="topic-sub">Recebidos nos últimos 7 dias</div>';
+    if (!rawRecent || rawRecentKey !== currentStoreId) html += '<div class="topic-empty">Carregando…</div>';
+    else if (!rawRecent.length) html += '<div class="topic-empty">Nenhum recebimento nos últimos 7 dias.</div>';
+    else rawRecent.slice(0, 30).forEach(function(m){
+      var d = new Date(m.timestamp), p = products[m.productId];
+      html += '<div class="topic-row static"><span><b>' + esc(m.productName || "") + '</b><small>' + d.toLocaleDateString("pt-BR", {day:"2-digit", month:"2-digit"}) + ' ' + d.toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"}) +
+        (m.supplierName ? ' · ' + esc(m.supplierName) : '') + ' · ' + esc(m.employeeName || "") + '</small></span><b class="pos">+' + fmtQty(m.quantity) + ' <small>' + esc(p ? (p.unit || "un") : "") + '</small></b></div>';
+    });
+  }
+  if (!pids.length) {
+    html += '<div class="empty-state" style="padding:22px 8px;"><div class="emoji">🏷️</div>Nenhum produto desta loja está marcado como <b>' + (kind === "produzido" ? "Produzido" : "Não produzido") + '</b>.<br>A Diretoria marca em <b>Produtos</b> → abrir o produto → <b>Área no estoque</b>.</div>';
+  } else {
+    html += '<div class="topic-sub" style="margin-top:18px;">Itens desta área (' + pids.length + ') · saldo atual</div>' + topicItemList(pids);
+  }
+  content.innerHTML = html;
+  bindTopicBack(); bindTopicRows();
+  var st = document.getElementById("bTopicStart");
+  if (st) st.addEventListener("click", function(){ if (kind === "produzido") openCountForm("produzido"); else openRawReceiveForm(); });
 }
 
 function renderPainel() {
@@ -1341,6 +1493,9 @@ function renderEstoque() {
   if (estoqueAllMode) { renderAllStoresStock(); return; }
   if (estoqueMovMode) { renderStoreMovs(); return; }
   if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
+  if (!estoqueView) { renderEstoqueHub(); return; }
+  if (estoqueView === "contagem") { renderCountTopic(); return; }
+  if (estoqueView === "produzido" || estoqueView === "bruto") { renderKindTopic(estoqueView); return; }
   var list = storeProductOrder(currentStoreId).map(function(id){ return products[id]; });
   if (searchTerm) {
     var t = searchTerm.toLowerCase();
@@ -1348,25 +1503,8 @@ function renderEstoque() {
   }
   if (estoqueCatFilter) list = list.filter(function(p){ return (p.categoryId || "_none") === estoqueCatFilter; });
 
-  var html = '';
-  var isCentralStore = stores[currentStoreId] && stores[currentStoreId].isCentral;
-  if (COUNT_ROLES.indexOf(currentRole()) !== -1) {
-    var last = scopedCounts.filter(function(x){ return !x.partial; })[0];
-    html += '<div class="item-row" style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;">' +
-      '<div style="font-size:13px;">📋 Última contagem: ' + (last ? '<b>' + fmtDateShort(last.date) + '</b> · ' + fmtMoney(last.totalValue) : '<b>nenhuma</b>') + '</div>' +
-      '<button class="btn btn-primary btn-sm" id="bCount">Contagem de estoque</button></div>';
-  }
-  if (currentRole() !== FRIDGE_ROLE) {
-    var nProd = storeProductOrder(currentStoreId).filter(function(pid){ return products[pid].prodType === "produzido"; }).length;
-    var nRaw = storeProductOrder(currentStoreId).filter(function(pid){ return products[pid].prodType === "bruto"; }).length;
-    html += '<div class="kind-btns">' +
-      (COUNT_ROLES.indexOf(currentRole()) !== -1 ? '<button class="kind-btn" id="bCountProd"><span class="ic">🔪</span><span><b>Contagem de estoque produzido</b><small>' + nProd + ' item(ns) já prontos na base</small></span></button>' : '') +
-      '<button class="kind-btn" id="bRawRecv"><span class="ic">📥</span><span><b>Recebimento de mercadoria não produzida</b><small>' + nRaw + ' item(ns) recebidos brutos (kg)</small></span></button></div>';
-  }
-  html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">' +
-    (ALL_STOCK_ROLES.indexOf(currentRole()) !== -1 ? '<button class="btn btn-secondary" id="bAllStores" style="margin:0;flex:2;min-width:200px;">🏬 Ver estoque de todas as lojas</button>' : '') +
-    '<button class="btn btn-secondary" id="bMovs" style="margin:0;flex:2;min-width:200px;">📒 Lançamentos por data</button>' +
-    '<button class="btn btn-secondary" id="bStockPdf" style="margin:0;flex:1;min-width:140px;">📄 Resumo em PDF</button></div>';
+  var html = topicHeader("📦 Saldo do estoque", "Quanto há de cada produto nesta loja. Toque no produto para lançar entrada, saída ou perda.",
+    '<button class="link-btn" id="bStockPdf">📄 PDF</button>');
   html += '<div class="searchbar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>' +
     '<input id="searchInput" type="text" placeholder="Buscar produto ou código..." value="' + esc(searchTerm) + '"></div>';
 
@@ -1438,16 +1576,8 @@ function renderEstoque() {
   content.querySelectorAll("[data-open]").forEach(function(c){
     c.addEventListener("click", function(){ openProductStockDetail(c.getAttribute("data-open")); });
   });
-  var bc = document.getElementById("bCount");
-  if (bc) bc.addEventListener("click", function(){ openCountForm(); });
-  var bcp = document.getElementById("bCountProd");
-  if (bcp) bcp.addEventListener("click", function(){ openCountForm("produzido"); });
-  var brr = document.getElementById("bRawRecv");
-  if (brr) brr.addEventListener("click", function(){ openRawReceiveForm(); });
   var bsp = document.getElementById("bStockPdf"); if (bsp) bsp.addEventListener("click", printEstoque);
-  var bmv = document.getElementById("bMovs"); if (bmv) bmv.addEventListener("click", function(){ estoqueMovMode = true; movSearch = ""; renderStoreMovs(); });
-  var ba = document.getElementById("bAllStores");
-  if (ba) ba.addEventListener("click", function(){ estoqueAllMode = true; allStock = null; storeSelect.style.display = "none"; renderAllStoresStock(); loadAllStock(); });
+  bindTopicBack();
 }
 
 // ---------- ESTOQUE DE TODAS AS LOJAS (Operador de Estoque, Gerência, Diretoria) ----------
@@ -1546,7 +1676,7 @@ function renderStoreMovs() {
   if (!s.from) { var d0 = new Date(); d0.setDate(d0.getDate()-6); s.from = ymd(d0); s.to = todayStr(); }
   var r = movRange(), key = currentStoreId + "_" + r.start + "_" + r.end;
   var sname = stores[currentStoreId] ? stores[currentStoreId].name : "";
-  var html = '<div class="section-head"><button class="link-btn" id="mvBack">← Voltar ao estoque</button>' +
+  var html = '<div class="section-head"><button class="link-btn" id="mvBack">← Tópicos do estoque</button>' +
     '<div style="display:flex;gap:14px;"><button class="link-btn" id="mvPdf">📄 PDF</button><button class="link-btn" id="mvReload">🔄 Atualizar</button></div></div>' +
     '<h2 style="font-size:18px;margin:0 0 10px 0;">📒 Lançamentos — ' + esc(sname) + '</h2>' +
     '<div class="item-row" style="margin-bottom:12px;"><div class="chip-group" style="margin-bottom:10px;">' +
@@ -1595,7 +1725,7 @@ function renderStoreMovs() {
 function bindStoreMovs() {
   var s = movState;
   function on(id, ev, fn) { var el = document.getElementById(id); if (el) el.addEventListener(ev, fn); }
-  on("mvBack", "click", function(){ estoqueMovMode = false; renderEstoque(); });
+  on("mvBack", "click", function(){ estoqueMovMode = false; estoqueView = ""; renderEstoque(); });
   on("mvReload", "click", function(){ movData = null; renderStoreMovs(); });
   on("mvPdf", "click", printStoreMovs);
   content.querySelectorAll("[data-mvp]").forEach(function(ch){ ch.addEventListener("click", function(){ s.period = ch.getAttribute("data-mvp"); renderStoreMovs(); }); });
@@ -1626,13 +1756,14 @@ function printStoreMovs() {
 }
 function exitAllStores() {
   estoqueAllMode = false;
+  estoqueView = "";
   storeSelect.style.display = "";
   renderEstoque();
 }
 function renderAllStoresStock() {
   storeSelect.style.display = "none";
   var sids = storeOrder.filter(function(sid){ return stores[sid]; });
-  var html = '<div class="section-head"><button class="link-btn" id="bAllBack">← Voltar para ' + esc(stores[currentStoreId] ? stores[currentStoreId].name : "a loja") + '</button>' +
+  var html = '<div class="section-head"><button class="link-btn" id="bAllBack">← Tópicos do estoque</button>' +
     '<div style="display:flex;gap:14px;"><button class="link-btn" id="bAllPdf">📄 PDF</button><button class="link-btn" id="bAllReload">🔄 Atualizar</button></div></div>' +
     '<h2 style="font-size:18px;margin:0 0 4px 0;">🏬 Estoque de todas as lojas</h2>' +
     '<div style="font-size:12.5px;color:var(--text-2);margin-bottom:12px;">Saldo informado por cada loja (lançamentos, contagens e recebimentos).</div>';
