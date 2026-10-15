@@ -131,6 +131,19 @@
   }
   function enc(v) { return encodeURIComponent(v); }
   function rpc(fn, args) { return rest("POST", "rpc/" + fn, args || {}); }
+  // Chama uma função do servidor (Edge Function), com o login atual
+  function callFunction(name, body) {
+    return ensureFresh().then(function () {
+      return fetch(BASE + "/functions/v1/" + name, { method: "POST",
+        headers: { "apikey": KEY, "Authorization": "Bearer " + session.access_token, "Content-Type": "application/json", "x-region": "sa-east-1" },
+        body: JSON.stringify(body || {}) }).then(null, function () { throw mkErr("unavailable", "Sem conexão com o servidor"); });
+    }).then(function (res) {
+      return parseBody(res).then(function (b) {
+        if (!res.ok || (b && b.ok === false)) throw mkErr(res.status === 401 ? "permission_denied" : "unavailable", (b && (b.error || b.message)) || ("Erro " + res.status), { status: res.status });
+        return b;
+      });
+    });
+  }
 
   // ---------------- DOCUMENTOS ----------------
   function randomId() {
@@ -307,6 +320,7 @@
       return new DocRef(p.slice(0, -1).join("/"), p[p.length - 1]);
     },
     rpc: rpc,
+    fn: callFunction,
     refresh: pollNow
   };
 

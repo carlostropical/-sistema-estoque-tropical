@@ -284,6 +284,15 @@
 #printArea .pr-muted { color: #5b5f66; font-size: 11px; }
 #printArea div.pr-sub { font-weight: 700; font-size: 13px; margin: 10px 0 4px 0; }
 #printArea .pr-total td { font-weight: 800; background: #f2f4f6; }
+.pdv-tag { display:inline-block; font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:10px; background:#fde7d9; color:#b3541e; vertical-align:1px; }
+.pdv-card { border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:12px; background:var(--surface); }
+.pdv-card h3 { font-size:15px; margin:0 0 8px 0; }
+.pdv-ok { color:var(--accent); font-weight:700; } .pdv-err { color:var(--red); font-weight:700; }
+.pdv-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+.pdv-tbl th { text-align:left; font-size:11.5px; color:var(--text-2); padding:5px 4px; border-bottom:1px solid var(--border); }
+.pdv-tbl td { padding:7px 4px; border-bottom:1px solid var(--border); }
+.pdv-tbl .n { text-align:right; white-space:nowrap; }
+.pdv-tbl tr[data-pdvday] { cursor:pointer; }
 </style>
 </head>
 <body class="locked">
@@ -479,10 +488,11 @@ var ROUTES = {
   fornecedores:  {title:"Fornecedores", storeScoped:false, group:"cad"},
   lojas:         {title:"Lojas", storeScoped:false, group:"cad"},
   funcionarios:  {title:"Funcionários", storeScoped:false, group:"cad"},
+  pdv:           {title:"Integração PDV", storeScoped:false, group:"cad"},
   diretoria:     {title:"Diretoria", storeScoped:false, group:"dir"}
 };
 var ROUTE_ICONS = {painel:"📊",estoque:"📦",compras:"🧾",custos:"💰",vendas:"📈",tarefas:"✅",relatorios:"📑",geladeira:"🧊",producao:"🔪",
-  produtos:"🏷️",precos:"💲",fornecedores:"🚚",lojas:"🏬",funcionarios:"👥",diretoria:"🔒"};
+  produtos:"🏷️",precos:"💲",fornecedores:"🚚",lojas:"🏬",funcionarios:"👥",pdv:"🔌",diretoria:"🔒"};
 
 function buildDrawer() {
   var html = '<div class="brand">📋 Gestão Operacional</div>';
@@ -504,6 +514,7 @@ function buildDrawer() {
     var sub = r==="precos";
     html += '<div class="item' + (currentRoute===r?" active":"") + '" data-route="' + r + '"' + (sub?' style="padding-left:38px;font-size:14px;"':'') + '>' + (sub?'↳ ':'') + ROUTE_ICONS[r] + ' ' + ROUTES[r].title + '</div>';
   });
+  if (canSeeCmv()) html += '<div class="item' + (currentRoute==="pdv"?" active":"") + '" data-route="pdv">🔌 Integração PDV</div>';
   html += '<h3>Acesso restrito</h3>';
   html += '<div class="item' + (currentRoute==="diretoria"?" active":"") + '" data-route="diretoria">🔒 Diretoria</div>';
   html += '<div class="item item-logout" data-logout="1">🚪 Sair do sistema</div>';
@@ -572,6 +583,7 @@ function renderRoute() {
     case "relatorios": return renderRelatorios();
     case "geladeira": return renderGeladeira();
     case "producao": return renderProducao();
+    case "pdv": return renderPdv();
     case "tarefas": return renderTarefas();
     case "produtos": return renderProdutos();
     case "precos": return renderPrecos();
@@ -960,6 +972,169 @@ function printProducao() {
   var tn = prodTpl ? (prodTemplatesList().filter(function(t){ return t.id === prodTpl; })[0] || {}).name : "Todos";
   openPrintPreview("Produção — " + stores[currentStoreId].name, ["Loja: " + stores[currentStoreId].name, "Período: " + r.label, "Produto: " + tn], h);
 }
+// ============================================================
+// INTEGRAÇÃO PDV (Saipos) — vendas do dia buscadas automaticamente
+// ============================================================
+var pdvCfg = null, pdvDays = null, pdvLoading = false, pdvBusy = false, pdvRange = {from:"", to:""};
+function pdvYmdAdd(ds, n) { var d = dateFromStr(ds); d.setDate(d.getDate()+n); return ymd(d); }
+function loadPdv() {
+  if (pdvLoading) return;
+  pdvLoading = true;
+  var since = pdvYmdAdd(todayStr(), -14);
+  Promise.all([
+    db.doc("meta/pdvConfig").get().then(function(s){ return s.exists ? s.data() : {}; }),
+    db.collection("pdv_daily").where("date", ">=", since).get().then(function(qs){ return qs.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); }); })
+  ]).then(function(r){
+    pdvCfg = r[0] || {}; pdvDays = r[1] || []; pdvLoading = false;
+    if (currentRoute === "pdv") renderPdv();
+  }).catch(function(err){
+    pdvLoading = false;
+    content.innerHTML = '<div class="empty-state"><div class="emoji">⚠️</div>Não foi possível carregar a integração.<br>' + esc(errMsg(err)) + '</div>';
+  });
+}
+function pdvStoreLabel(pid) {
+  var sid = pdvCfg && pdvCfg.saiposStores ? pdvCfg.saiposStores[pid] : "";
+  return sid && stores[sid] ? stores[sid].name : "";
+}
+function renderPdv() {
+  if (!canSeeCmv()) { content.innerHTML = '<div class="empty-state"><div class="emoji">🔒</div>Somente Gerência e Diretoria acessam a integração do PDV.</div>'; return; }
+  if (!pdvCfg) { content.innerHTML = '<div class="loading-msg">Carregando integração…</div>'; loadPdv(); return; }
+  var isDir = currentRole() === "Diretoria", cfg = pdvCfg;
+  if (!pdvRange.from) { pdvRange.to = pdvYmdAdd(todayStr(), -1); pdvRange.from = pdvRange.to; }
+  var html = '<div class="section-head"><h2>🔌 Integração PDV</h2><button class="link-btn" id="pdvReload">🔄 Atualizar</button></div>';
+  html += '<div style="font-size:12.5px;color:var(--text-2);margin:-4px 0 12px 0;">Todo dia às <b>5h30</b> o sistema busca no <b>Saipos</b> as vendas dos últimos 3 dias e lança a <b>venda do dia</b> de cada loja vinculada em Vendas &amp; CMV (sem a taxa de serviço). Não precisa digitar.</div>';
+
+  // 1. token
+  html += '<div class="pdv-card"><h3>1. Token da API do Saipos</h3>';
+  if (cfg.saiposTokenSet) {
+    html += '<div><span class="pdv-ok">✓ Configurado</span> <span style="color:var(--text-2);font-size:12.5px;">(final ' + esc(cfg.saiposTokenHint || "") + (cfg.saiposTokenAt ? ' · ' + fmtDate(cfg.saiposTokenAt) : '') + (cfg.saiposTokenBy ? ' por ' + esc(cfg.saiposTokenBy) : '') + ')</span></div>';
+  } else {
+    html += '<div class="pdv-err">Não configurado</div><div style="font-size:12.5px;color:var(--text-2);margin-top:4px;">Peça o token da <b>API de Dados</b> ao Saipos (formulário na documentação deles). Ele chega por e-mail em até 1 dia útil.</div>';
+  }
+  if (isDir) {
+    html += '<div class="field" style="margin:10px 0 6px 0;"><label>' + (cfg.saiposTokenSet ? 'Trocar token' : 'Colar o token recebido do Saipos') + '</label>' +
+      '<input type="password" id="pdvToken" autocomplete="off" placeholder="eyJhbGciOi…"></div>' +
+      '<div style="display:flex;gap:8px;"><button class="btn btn-primary btn-sm" id="pdvSaveToken" style="width:auto;">Salvar token</button>' +
+      (cfg.saiposTokenSet ? '<button class="btn btn-secondary btn-sm" id="pdvClearToken" style="width:auto;color:var(--red);">Remover</button>' : '') + '</div>' +
+      '<div style="font-size:11.5px;color:var(--text-2);margin-top:6px;">🔒 O token fica guardado criptografado no servidor. Depois de salvo, ninguém consegue vê-lo pelo sistema.</div>';
+  } else html += '<div style="font-size:12px;color:var(--text-2);margin-top:6px;">Somente a Diretoria cadastra o token.</div>';
+  html += '</div>';
+
+  // 2. vínculo de lojas
+  var ids = {};
+  Object.keys(cfg.saiposStores || {}).forEach(function(k){ ids[k] = 1; });
+  Object.keys(cfg.saiposSeen || {}).forEach(function(k){ ids[k] = 1; });
+  var idList = Object.keys(ids).sort();
+  html += '<div class="pdv-card"><h3>2. Lojas do Saipos → lojas do sistema</h3>';
+  html += '<div style="font-size:12.5px;color:var(--text-2);margin-bottom:8px;">Cada loja no Saipos tem um código. Depois da primeira sincronização os códigos aparecem aqui sozinhos; vincule cada um à loja certa. Loja sem vínculo não gera venda.</div>';
+  if (!idList.length) html += '<div style="font-size:13px;margin-bottom:8px;">Nenhuma loja do Saipos encontrada ainda.</div>';
+  var opts = storeOrder.filter(function(s){ return stores[s] && !stores[s].isCentral; });
+  idList.forEach(function(pid){
+    var cur = (cfg.saiposStores || {})[pid] || "";
+    html += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;"><div style="min-width:96px;font-weight:700;font-size:13px;">Saipos ' + esc(pid) + '</div>' +
+      '<select data-pdvmap="' + esc(pid) + '"' + (isDir ? '' : ' disabled') + ' style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);">' +
+      '<option value="">— sem vínculo —</option>' + opts.map(function(s){ return '<option value="' + s + '"' + (s === cur ? ' selected' : '') + '>' + esc(stores[s].name) + '</option>'; }).join("") + '</select></div>';
+  });
+  if (isDir) html += '<div style="display:flex;gap:8px;margin-top:6px;"><input type="text" id="pdvNewId" inputmode="numeric" placeholder="Código da loja no Saipos" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);">' +
+    '<button class="btn btn-secondary btn-sm" id="pdvAddId" style="width:auto;">+ Adicionar</button></div>' +
+    '<button class="btn btn-primary btn-sm" id="pdvSaveMap" style="margin-top:10px;">Salvar vínculos</button>';
+  html += '</div>';
+
+  // 3. sincronização
+  html += '<div class="pdv-card"><h3>3. Sincronização</h3>';
+  if (cfg.lastRun) html += '<div style="font-size:13px;margin-bottom:6px;">Última: <b>' + fmtDate(cfg.lastRun) + '</b>' + (cfg.lastBy ? ' · ' + esc(cfg.lastBy) : '') + '<br><span class="' + (cfg.lastOk ? 'pdv-ok' : 'pdv-err') + '">' + (cfg.lastOk ? '✓ ' : '⚠️ ') + esc(cfg.lastMessage || "") + '</span></div>';
+  else html += '<div style="font-size:13px;margin-bottom:6px;color:var(--text-2);">Ainda não sincronizou.</div>';
+  html += '<div class="row2"><div class="field" style="margin-bottom:8px;"><label>De</label><input type="date" id="pdvFrom" value="' + pdvRange.from + '" max="' + todayStr() + '"></div>' +
+    '<div class="field" style="margin-bottom:8px;"><label>Até</label><input type="date" id="pdvTo" value="' + pdvRange.to + '" max="' + todayStr() + '"></div></div>' +
+    '<button class="btn btn-primary" id="pdvSync"' + (pdvBusy || !cfg.saiposTokenSet ? ' disabled' : '') + '>' + (pdvBusy ? 'Buscando no Saipos…' : '🔄 Sincronizar agora') + '</button>' +
+    '<div style="font-size:11.5px;color:var(--text-2);margin-top:4px;">Até 15 dias por vez. Pode repetir sem medo: a venda do dia é atualizada, nunca duplicada.</div></div>';
+
+  // 4. últimos dias
+  var rows = (pdvDays || []).slice().sort(function(a,b){ return (b.date||"").localeCompare(a.date||"") || String(a.pdvStoreId).localeCompare(String(b.pdvStoreId)); });
+  html += '<div class="pdv-card"><h3>4. Vendas recebidas do Saipos (últimos 14 dias)</h3>';
+  if (!rows.length) html += '<div style="font-size:13px;color:var(--text-2);">Nada recebido ainda.</div>';
+  else {
+    html += '<div style="overflow-x:auto;"><table class="pdv-tbl"><thead><tr><th>Dia</th><th>Loja</th><th class="n">Vendas</th><th class="n">Valor*</th><th class="n">Canc.</th></tr></thead><tbody>';
+    rows.forEach(function(d){
+      var nm = pdvStoreLabel(d.pdvStoreId);
+      html += '<tr data-pdvday="' + esc(d.id) + '"><td>' + fmtDateShort(d.date).slice(0,5) + '</td><td>' + (nm ? esc(nm) : '<span class="pdv-err">Saipos ' + esc(d.pdvStoreId) + '</span>') + '</td>' +
+        '<td class="n">' + (d.salesCount || 0) + '</td><td class="n"><b>' + fmtMoney(d.net || 0) + '</b></td><td class="n">' + (d.canceledCount || 0) + '</td></tr>';
+    });
+    html += '</tbody></table></div><div style="font-size:11.5px;color:var(--text-2);margin-top:6px;">* Valor sem a taxa de serviço. Toque no dia para ver formas de pagamento e itens mais vendidos.</div>';
+  }
+  html += '</div>';
+  html += '<div class="pdv-card"><h3>KCMS</h3><div style="font-size:12.5px;color:var(--text-2);">Aguardando o suporte do KCMS informar se libera integração. Se não liberar, será criada aqui a importação do relatório de vendas do dia.</div></div>';
+  content.innerHTML = html;
+  bindPdv();
+}
+function bindPdv() {
+  var el;
+  if ((el = document.getElementById("pdvReload"))) el.addEventListener("click", function(){ pdvCfg = null; renderPdv(); });
+  if ((el = document.getElementById("pdvSaveToken"))) el.addEventListener("click", function(){
+    var t = document.getElementById("pdvToken").value.trim();
+    if (t.length < 20) { showToast("Cole o token completo enviado pelo Saipos"); return; }
+    el.disabled = true; el.textContent = "Salvando…";
+    db.rpc("pdv_set_saipos_token", {p_token: t}).then(function(){ showToast("Token salvo com segurança"); pdvCfg = null; renderPdv(); })
+      .catch(function(err){ el.disabled = false; el.textContent = "Salvar token"; showToast("Erro: " + errMsg(err)); });
+  });
+  if ((el = document.getElementById("pdvClearToken"))) el.addEventListener("click", function(){
+    if (!confirm("Remover o token? A busca automática de vendas vai parar.")) return;
+    db.rpc("pdv_clear_saipos_token", {}).then(function(){ showToast("Token removido"); pdvCfg = null; renderPdv(); })
+      .catch(function(err){ showToast("Erro: " + errMsg(err)); });
+  });
+  if ((el = document.getElementById("pdvAddId"))) el.addEventListener("click", function(){
+    var v = document.getElementById("pdvNewId").value.trim();
+    if (!/^\d+$/.test(v)) { showToast("Informe o código numérico da loja no Saipos"); return; }
+    pdvCfg.saiposStores = Object.assign({}, pdvCfg.saiposStores || {}); if (!pdvCfg.saiposStores.hasOwnProperty(v)) pdvCfg.saiposStores[v] = "";
+    renderPdv();
+  });
+  if ((el = document.getElementById("pdvSaveMap"))) el.addEventListener("click", function(){
+    var map = {}, used = {}, dup = "";
+    content.querySelectorAll("[data-pdvmap]").forEach(function(s){
+      var v = s.value; map[s.getAttribute("data-pdvmap")] = v;
+      if (v) { if (used[v]) dup = stores[v] ? stores[v].name : v; used[v] = 1; }
+    });
+    if (dup && !confirm("A loja " + dup + " ficou vinculada a mais de um código do Saipos. As vendas dos dois serão lançadas nela. Continuar?")) return;
+    el.disabled = true; el.textContent = "Salvando…";
+    var ref = db.doc("meta/pdvConfig");
+    ref.get().then(function(s){ return s.exists ? ref.update({saiposStores: map}) : ref.set({saiposStores: map}); })
+      .then(function(){ showToast("Vínculos salvos. Sincronize para lançar as vendas."); pdvCfg.saiposStores = map; renderPdv(); })
+      .catch(function(err){ el.disabled = false; el.textContent = "Salvar vínculos"; showToast("Erro: " + errMsg(err)); });
+  });
+  ["pdvFrom","pdvTo"].forEach(function(id){ var e = document.getElementById(id); if (e) e.addEventListener("change", function(){ pdvRange[id === "pdvFrom" ? "from" : "to"] = e.value; }); });
+  if ((el = document.getElementById("pdvSync"))) el.addEventListener("click", function(){
+    var f = pdvRange.from, t = pdvRange.to;
+    if (!f || !t) { showToast("Escolha as datas"); return; }
+    if (f > t) { var x = f; f = t; t = x; }
+    if ((dateFromStr(t) - dateFromStr(f)) / 86400000 > 14) { showToast("Escolha no máximo 15 dias"); return; }
+    pdvBusy = true; renderPdv();
+    db.fn("pdv-sync", {from: f, to: t}).then(function(r){
+      pdvBusy = false; showToast(r.message || "Sincronizado"); networkCmvCache = {}; pdvCfg = null; renderPdv();
+    }).catch(function(err){ pdvBusy = false; showToast("Erro: " + errMsg(err)); pdvCfg = null; renderPdv(); });
+  });
+  content.querySelectorAll("[data-pdvday]").forEach(function(tr){ tr.addEventListener("click", function(){ openPdvDay(tr.getAttribute("data-pdvday")); }); });
+}
+function openPdvDay(id) {
+  var d = (pdvDays || []).filter(function(x){ return x.id === id; })[0]; if (!d) return;
+  var nm = pdvStoreLabel(d.pdvStoreId) || ("Saipos " + d.pdvStoreId);
+  var h = '<h2>' + esc(nm) + ' · ' + fmtDateShort(d.date) + '</h2><div class="sub">Dados do Saipos, atualizados em ' + fmtDate(d.syncedAt) + '</div>';
+  h += '<table class="pdv-tbl"><tr><td>Vendas</td><td class="n">' + (d.salesCount||0) + '</td></tr>' +
+    '<tr><td>Total com taxa de serviço</td><td class="n">' + fmtMoney(d.gross||0) + '</td></tr>' +
+    '<tr><td>Taxa de serviço</td><td class="n">' + fmtMoney(d.serviceCharge||0) + '</td></tr>' +
+    '<tr><td><b>Venda do dia (lançada)</b></td><td class="n"><b>' + fmtMoney(d.net||0) + '</b></td></tr>' +
+    '<tr><td>Descontos</td><td class="n">' + fmtMoney(d.discount||0) + '</td></tr>' +
+    '<tr><td>Canceladas</td><td class="n">' + (d.canceledCount||0) + ' · ' + fmtMoney(d.canceledAmount||0) + '</td></tr></table>';
+  var bt = d.byType || {}, bp = d.byPayment || {};
+  if (Object.keys(bt).length) { h += '<div class="chart-title" style="margin-top:12px;">Por tipo</div><table class="pdv-tbl">' + Object.keys(bt).map(function(k){ return '<tr><td>' + esc(k) + '</td><td class="n">' + bt[k].count + '</td><td class="n">' + fmtMoney(bt[k].total) + '</td></tr>'; }).join("") + '</table>'; }
+  if (Object.keys(bp).length) { h += '<div class="chart-title" style="margin-top:12px;">Formas de pagamento</div><table class="pdv-tbl">' + Object.keys(bp).sort(function(a,b){ return bp[b]-bp[a]; }).map(function(k){ return '<tr><td>' + esc(k) + '</td><td class="n">' + fmtMoney(bp[k]) + '</td></tr>'; }).join("") + '</table>'; }
+  var it = (d.items || []).slice(0, 40);
+  if (it.length) { h += '<div class="chart-title" style="margin-top:12px;">Itens mais vendidos' + ((d.items||[]).length > 40 ? ' (40 de ' + d.items.length + ')' : '') + '</div><table class="pdv-tbl"><tr><th>Item</th><th class="n">Qtd</th><th class="n">Valor</th></tr>' +
+    it.map(function(x){ return '<tr><td>' + esc(x.name) + (x.code ? ' <span style="color:var(--text-2);font-size:11px;">' + esc(x.code) + '</span>' : '') + '</td><td class="n">' + fmtQty(x.qty) + '</td><td class="n">' + fmtMoney(x.total) + '</td></tr>'; }).join("") + '</table>'; }
+  h += '<button class="btn btn-secondary" id="pdvDayClose" style="margin-top:12px;">Fechar</button>';
+  openSheet(h);
+  document.getElementById("pdvDayClose").addEventListener("click", closeSheet);
+}
+
 function renderPainel() {
   var storeId = currentStoreId;
   if (!storeId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
@@ -3379,7 +3554,8 @@ function renderVendas() {
     } else {
       monthSales.slice().sort(function(a,b){return (b.date||"").localeCompare(a.date||"");}).forEach(function(s){
         html += '<div class="move-item"><div class="move-icon entrada">💵</div><div class="move-body">' +
-          '<div class="move-title">Venda do dia</div><div class="move-sub">' + fmtDateShort(s.date) + '</div></div>' +
+          '<div class="move-title">Venda do dia' + (s.source === "saipos" ? ' <span class="pdv-tag">Saipos</span>' : '') + '</div><div class="move-sub">' + fmtDateShort(s.date) +
+          (s.source === "saipos" ? ' · ' + (s.salesCount || 0) + ' venda(s) · sem taxa de serviço' : (s.employeeName ? ' · ' + esc(s.employeeName) : '')) + '</div></div>' +
           '<div class="move-qty entrada">' + fmtMoney(s.amount) + '</div></div>';
       });
     }
@@ -3442,6 +3618,9 @@ function openSaleForm() {
   document.getElementById("bSave").addEventListener("click", function(){
     var amount = parseFloat(document.getElementById("sAmount").value);
     if (!amount || amount<=0) { showToast("Informe um valor válido"); return; }
+    var sDay = document.getElementById("sDate").value || todayStr();
+    if (scopedSales.some(function(x){ return x.source === "saipos" && x.date === sDay; }) &&
+        !confirm("Este dia já tem a venda vinda do Saipos automaticamente. Lançar aqui vai SOMAR ao valor do Saipos. Continuar?")) return;
     var storeName = stores[currentStoreId] ? stores[currentStoreId].name : "";
     var btn = document.getElementById("bSave"); btn.disabled=true; btn.textContent="Salvando…";
     db.collection("sales").add({
