@@ -293,6 +293,20 @@
 .pdv-tbl td { padding:7px 4px; border-bottom:1px solid var(--border); }
 .pdv-tbl .n { text-align:right; white-space:nowrap; }
 .pdv-tbl tr[data-pdvday] { cursor:pointer; }
+.kind-btns { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+.kind-btn { display:flex; gap:10px; align-items:center; text-align:left; padding:12px; border-radius:12px; border:1.5px solid var(--border); background:var(--surface); color:var(--text); font:inherit; cursor:pointer; }
+.kind-btn .ic { font-size:22px; }
+.kind-btn b { display:block; font-size:13.5px; line-height:1.2; }
+.kind-btn small { display:block; font-size:11.5px; color:var(--text-2); margin-top:2px; }
+.kind-btn:active { background:var(--surface-2); }
+@media (max-width: 420px) { .kind-btns { grid-template-columns:1fr; } }
+.kind-tag { display:inline-block; font-size:11px; font-weight:700; padding:1px 7px; border-radius:10px; }
+.kind-produzido { background:#e7f3ec; color:#1f6f43; } .kind-bruto { background:#fdf0e3; color:#a1561b; }
+.rr-list { max-height:240px; overflow-y:auto; border:1px solid var(--border); border-radius:10px; }
+.rr-opt { display:flex; justify-content:space-between; gap:8px; padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; font-size:14px; }
+.rr-opt:last-child { border-bottom:none; } .rr-opt small { color:var(--text-2); white-space:nowrap; }
+.rr-opt.on { background:var(--accent-2); }
+.rr-sel { padding:10px 12px; border-radius:10px; background:var(--accent-2); margin:-6px 0 12px 0; font-size:14px; }
 </style>
 </head>
 <body class="locked">
@@ -1135,6 +1149,110 @@ function openPdvDay(id) {
   document.getElementById("pdvDayClose").addEventListener("click", closeSheet);
 }
 
+// ============================================================
+// ÁREAS DO ESTOQUE: produzido x não produzido (bruto)
+// ============================================================
+var PROD_KIND_OPTS = [
+  {v:"", l:"Não manipulado (bebidas, revenda…)"},
+  {v:"produzido", l:"🔪 Produzido (pronto na base)"},
+  {v:"bruto", l:"📥 Não produzido (recebido bruto, por kg)"}
+];
+var PROD_KIND_HELP = {
+  "": "Não aparece em nenhuma das duas áreas. Ex.: cervejas, refrigerantes, descartáveis.",
+  "produzido": "Aparece na <b>Contagem de estoque produzido</b>. Ex.: filé porcionado, molhos e itens já prontos na base.",
+  "bruto": "Aparece no <b>Recebimento de mercadoria não produzida</b>. Ex.: coxão mole, frango inteiro, peixe."
+};
+function prodKindLabel(v) { for (var i = 0; i < PROD_KIND_OPTS.length; i++) if (PROD_KIND_OPTS[i].v === (v || "")) return PROD_KIND_OPTS[i].l; return v; }
+function showNoKindItems(kind) {
+  openSheet('<h2>' + (kind === "produzido" ? "🔪 Estoque produzido" : "📥 Mercadoria não produzida") + '</h2>' +
+    '<div class="empty-state" style="padding:20px 6px;"><div class="emoji">🏷️</div>Nenhum produto desta loja está marcado como <b>' + (kind === "produzido" ? "Produzido" : "Não produzido") + '</b>.<br><br>' +
+    'A Diretoria marca em <b>Produtos</b> → abrir o produto → <b>Área no estoque</b>.</div>' +
+    '<button class="btn btn-secondary" id="bNkClose">Fechar</button>');
+  document.getElementById("bNkClose").addEventListener("click", closeSheet);
+}
+
+// Recebimento de mercadoria não produzida: um item por vez; a tela continua aberta para o próximo
+var rawRecvSession = [];
+function openRawReceiveForm(keepSupplier) {
+  if (!requireOperator()) return;
+  var list = storeProductOrder(currentStoreId).filter(function(pid){ return products[pid].prodType === "bruto"; })
+    .sort(function(a,b){ return (products[a].name||"").localeCompare(products[b].name||"", "pt-BR"); });
+  if (!list.length) { showNoKindItems("bruto"); return; }
+  var sname = stores[currentStoreId] ? stores[currentStoreId].name : "";
+  var today = todayStr();
+  var mine = rawRecvSession.filter(function(r){ return r.storeId === currentStoreId && r.day === today; });
+  var html = '<h2>📥 Recebimento de mercadoria não produzida</h2>' +
+    '<div class="sub">' + esc(sname) + ' — lance <b>um item por vez</b>, conforme a mercadoria chega. Depois de confirmar, a tela fica aberta para o próximo.</div>' +
+    '<div class="field"><label>Produto</label><input type="text" id="rrSearch" placeholder="Buscar: coxão mole, frango…" autocomplete="off" style="margin-bottom:6px;">' +
+    '<div id="rrList" class="rr-list">' + list.map(function(pid){
+      var p = products[pid], st = scopedStock[pid] ? scopedStock[pid].quantity : 0;
+      return '<div class="rr-opt" data-rrpid="' + pid + '" data-name="' + esc((p.name||"").toLowerCase()) + '"><span>' + esc(p.name) + '</span><small>estoque: ' + fmtQty(st) + ' ' + esc(p.unit||"un") + '</small></div>';
+    }).join("") + '</div></div>' +
+    '<div id="rrSel" class="rr-sel" style="display:none;"></div>' +
+    '<div class="row2"><div class="field"><label id="rrQtyLabel">Quantidade recebida</label><input type="number" inputmode="decimal" id="rrQty" min="0" step="any" placeholder="0,000"></div>' +
+    '<div class="field"><label>Fornecedor (opcional)</label><input type="text" id="rrSup" placeholder="Ex: Frigorífico X" value="' + esc(keepSupplier || "") + '"></div></div>' +
+    '<div class="row2" id="rrLotRow" style="display:none;"><div class="field"><label>Lote (opcional)</label><input type="text" id="rrLot"></div>' +
+    '<div class="field"><label>Validade (opcional)</label><input type="date" id="rrExp"></div></div>' +
+    '<div class="field"><label>Observação (opcional)</label><input type="text" id="rrNote" placeholder="Ex: nota 1234, temperatura ok"></div>' +
+    '<button class="btn btn-entrada" id="rrConfirm" disabled>✓ Confirmar recebimento deste item</button>' +
+    '<button class="btn btn-secondary" id="rrClose">Fechar</button>';
+  if (mine.length) {
+    html += '<div class="chart-title" style="margin-top:14px;">Recebidos agora (' + mine.length + ')</div>' +
+      mine.slice().reverse().map(function(r){ return '<div class="move-item"><div class="move-icon entrada">↓</div><div class="move-body"><div class="move-title">' + esc(r.name) + '</div>' +
+        '<div class="move-sub">' + r.time + (r.sup ? ' · ' + esc(r.sup) : '') + ' · ' + esc(r.by) + '</div></div><div class="move-qty entrada">+' + fmtQty(r.qty) + ' ' + esc(r.unit) + '</div></div>'; }).join("");
+  }
+  openSheet(html);
+  var selPid = "";
+  function choose(pid) {
+    selPid = pid; var p = products[pid], st = scopedStock[pid] ? scopedStock[pid].quantity : 0;
+    sheet.querySelectorAll(".rr-opt").forEach(function(o){ o.classList.toggle("on", o.getAttribute("data-rrpid") === pid); });
+    var sel = document.getElementById("rrSel");
+    sel.style.display = ""; sel.innerHTML = '<b>' + esc(p.name) + '</b> · estoque atual: ' + fmtQty(st) + ' ' + esc(p.unit||"un") + ' <button class="link-btn" id="rrChange" type="button">trocar</button>';
+    document.getElementById("rrList").style.display = "none"; document.getElementById("rrSearch").style.display = "none";
+    document.getElementById("rrChange").addEventListener("click", function(){
+      selPid = ""; sel.style.display = "none"; document.getElementById("rrList").style.display = ""; document.getElementById("rrSearch").style.display = "";
+      document.getElementById("rrConfirm").disabled = true; document.getElementById("rrSearch").focus();
+    });
+    document.getElementById("rrQtyLabel").textContent = "Quantidade recebida (" + (p.unit === "kg" ? "kg" : typeLabel(p.unit).toLowerCase()) + ")";
+    document.getElementById("rrLotRow").style.display = p.perishable ? "" : "none";
+    document.getElementById("rrConfirm").disabled = false;
+    document.getElementById("rrQty").focus();
+  }
+  sheet.querySelectorAll(".rr-opt").forEach(function(o){ o.addEventListener("click", function(){ choose(o.getAttribute("data-rrpid")); }); });
+  document.getElementById("rrSearch").addEventListener("input", function(e){
+    var t = e.target.value.toLowerCase();
+    sheet.querySelectorAll(".rr-opt").forEach(function(o){ o.style.display = !t || o.getAttribute("data-name").indexOf(t) !== -1 ? "" : "none"; });
+  });
+  document.getElementById("rrClose").addEventListener("click", closeSheet);
+  document.getElementById("rrConfirm").addEventListener("click", function(){
+    var p = products[selPid]; if (!p) { showToast("Escolha o produto"); return; }
+    var q = parseFloat(String(document.getElementById("rrQty").value).replace(",", "."));
+    if (!q || q <= 0) { showToast("Informe a quantidade recebida"); return; }
+    var sup = document.getElementById("rrSup").value.trim();
+    var note = document.getElementById("rrNote").value.trim();
+    var lot = document.getElementById("rrLot").value.trim(), exp = document.getElementById("rrExp").value;
+    var btn = document.getElementById("rrConfirm"); btn.disabled = true; btn.textContent = "Salvando…";
+    var cur = scopedStock[p.id] ? scopedStock[p.id].quantity : 0, nq = cur + q, now = Date.now();
+    var fullNote = "Recebimento não produzido" + (sup ? " · " + sup : "") + (note ? " · " + note : "");
+    db.doc("stock/" + currentStoreId + "_" + p.id).set({storeId: currentStoreId, productId: p.id, quantity: nq, updatedAt: now})
+      .then(function(){
+        scopedStock[p.id] = {storeId: currentStoreId, productId: p.id, quantity: nq, updatedAt: now};
+        return db.collection("movements").add({storeId: currentStoreId, storeName: sname, productId: p.id, productName: p.name,
+          type: "entrada", kind: "recebimento_bruto", quantity: q, supplierName: sup, employeeId: currentEmployeeId, employeeName: currentEmployeeName,
+          note: fullNote, timestamp: now});
+      })
+      .then(function(){
+        if (lot || exp) return db.collection("lots").add({storeId: currentStoreId, productId: p.id, productName: p.name, lotNumber: lot, expiryDate: exp, quantity: q, createdAt: now});
+      })
+      .then(function(){
+        rawRecvSession.push({storeId: currentStoreId, day: today, name: p.name, qty: q, unit: p.unit || "un", sup: sup, by: currentEmployeeName || "", time: nowTimeStr()});
+        showToast("✓ " + p.name + ": +" + fmtQty(q) + " " + (p.unit || "un") + " recebido");
+        openRawReceiveForm(sup);
+      })
+      .catch(function(err){ btn.disabled = false; btn.textContent = "✓ Confirmar recebimento deste item"; showToast("Erro ao salvar: " + errMsg(err)); });
+  });
+}
+
 function renderPainel() {
   var storeId = currentStoreId;
   if (!storeId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
@@ -1238,6 +1356,13 @@ function renderEstoque() {
       '<div style="font-size:13px;">📋 Última contagem: ' + (last ? '<b>' + fmtDateShort(last.date) + '</b> · ' + fmtMoney(last.totalValue) : '<b>nenhuma</b>') + '</div>' +
       '<button class="btn btn-primary btn-sm" id="bCount">Contagem de estoque</button></div>';
   }
+  if (currentRole() !== FRIDGE_ROLE) {
+    var nProd = storeProductOrder(currentStoreId).filter(function(pid){ return products[pid].prodType === "produzido"; }).length;
+    var nRaw = storeProductOrder(currentStoreId).filter(function(pid){ return products[pid].prodType === "bruto"; }).length;
+    html += '<div class="kind-btns">' +
+      (COUNT_ROLES.indexOf(currentRole()) !== -1 ? '<button class="kind-btn" id="bCountProd"><span class="ic">🔪</span><span><b>Contagem de estoque produzido</b><small>' + nProd + ' item(ns) já prontos na base</small></span></button>' : '') +
+      '<button class="kind-btn" id="bRawRecv"><span class="ic">📥</span><span><b>Recebimento de mercadoria não produzida</b><small>' + nRaw + ' item(ns) recebidos brutos (kg)</small></span></button></div>';
+  }
   html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">' +
     (ALL_STOCK_ROLES.indexOf(currentRole()) !== -1 ? '<button class="btn btn-secondary" id="bAllStores" style="margin:0;flex:2;min-width:200px;">🏬 Ver estoque de todas as lojas</button>' : '') +
     '<button class="btn btn-secondary" id="bMovs" style="margin:0;flex:2;min-width:200px;">📒 Lançamentos por data</button>' +
@@ -1314,7 +1439,11 @@ function renderEstoque() {
     c.addEventListener("click", function(){ openProductStockDetail(c.getAttribute("data-open")); });
   });
   var bc = document.getElementById("bCount");
-  if (bc) bc.addEventListener("click", openCountForm);
+  if (bc) bc.addEventListener("click", function(){ openCountForm(); });
+  var bcp = document.getElementById("bCountProd");
+  if (bcp) bcp.addEventListener("click", function(){ openCountForm("produzido"); });
+  var brr = document.getElementById("bRawRecv");
+  if (brr) brr.addEventListener("click", function(){ openRawReceiveForm(); });
   var bsp = document.getElementById("bStockPdf"); if (bsp) bsp.addEventListener("click", printEstoque);
   var bmv = document.getElementById("bMovs"); if (bmv) bmv.addEventListener("click", function(){ estoqueMovMode = true; movSearch = ""; renderStoreMovs(); });
   var ba = document.getElementById("bAllStores");
@@ -1581,14 +1710,18 @@ function bindAllStores() {
 var COUNT_ROLES = ["Operador de Loja","Operador de Estoque","Gerência","Diretoria"];
 var countCatFilter = "";
 function countCatKey(pid) { var cid = products[pid].categoryId; return cid && categories[cid] ? cid : "_none"; }
-function openCountForm() {
+var countKind = "";
+function openCountForm(kind) {
   if (!requireRole(COUNT_ROLES)) return;
+  countKind = kind || "";
   var byCat = {}, order = [];
-  storeProductOrder(currentStoreId).forEach(function(pid){ var k = countCatKey(pid); if (!byCat[k]) { byCat[k] = []; order.push(k); } byCat[k].push(pid); });
+  var cntList = storeProductOrder(currentStoreId).filter(function(pid){ return !countKind || products[pid].prodType === countKind; });
+  if (countKind && !cntList.length) { showNoKindItems(countKind); return; }
+  cntList.forEach(function(pid){ var k = countCatKey(pid); if (!byCat[k]) { byCat[k] = []; order.push(k); } byCat[k].push(pid); });
   order.sort(function(a,b){ var na = a==="_none" ? "zzz" : categories[a].name, nb = b==="_none" ? "zzz" : categories[b].name; return na.localeCompare(nb, "pt-BR"); });
   if (countCatFilter && !byCat[countCatFilter]) countCatFilter = "";
-  var html = '<h2>📋 Contagem de estoque</h2>' +
-    '<div class="sub">' + esc(stores[currentStoreId].name) + ' — informe a quantidade contada. O campo já vem com o saldo do sistema; altere só o que for diferente. ' +
+  var html = (countKind === "produzido" ? '<h2>🔪 Contagem de estoque produzido</h2>' : '<h2>📋 Contagem de estoque</h2>') +
+    '<div class="sub">' + esc(stores[currentStoreId].name) + (countKind === "produzido" ? ' — somente os itens que já estão prontos na base.' : '') + ' — informe a quantidade contada. O campo já vem com o saldo do sistema; altere só o que for diferente. ' +
     'Use <b>💾 Salvar este gênero</b> para ir salvando aos poucos.</div>' +
     '<div class="field"><label>Data da contagem</label><input type="date" id="cntDate" value="' + todayStr() + '"></div>' +
     '<div class="chip-scroll" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px;">' +
@@ -1614,7 +1747,7 @@ function openCountForm() {
     html += '</div>';
   });
   html += '<div style="position:sticky;bottom:0;background:var(--surface);padding-top:12px;">' +
-    '<button class="btn btn-primary" id="bCntSave">✓ Finalizar contagem completa</button>' +
+    '<button class="btn btn-primary" id="bCntSave">' + (countKind ? '✓ Finalizar contagem do produzido' : '✓ Finalizar contagem completa') + '</button>' +
     '<button class="btn btn-secondary" id="bCancel">Fechar</button></div>';
   openSheet(html);
   document.getElementById("bCancel").addEventListener("click", function(){
@@ -1668,7 +1801,7 @@ function saveCountCategory(catKey, btn) {
   var storeName = stores[currentStoreId].name;
   var catName = catKey === "_none" ? "Sem gênero" : categories[catKey].name;
   var chain = db.collection("counts").add({
-    storeId: currentStoreId, storeName: storeName, date: date, partial: true, categoryId: catKey, categoryName: catName,
+    storeId: currentStoreId, storeName: storeName, date: date, partial: true, categoryId: catKey, categoryName: catName, kind: countKind || "",
     items: items, totalValue: total, adjustments: diffs.length,
     employeeId: currentEmployeeId, employeeName: currentEmployeeName, createdAt: Date.now()
   });
@@ -1716,24 +1849,25 @@ function submitCount() {
     if (Math.abs(q - sys) > 1e-9) diffs.push({pid:pid, name:p.name, sys:sys, q:q});
   });
   var storeName = stores[currentStoreId].name;
-  var chain = db.collection("counts").add({
+  var kindNow = countKind;
+  var chain = db.collection("counts").add(Object.assign({
     storeId: currentStoreId, storeName: storeName, date: date, items: items, totalValue: total,
     adjustments: diffs.length, employeeId: currentEmployeeId, employeeName: currentEmployeeName, createdAt: Date.now()
-  });
+  }, kindNow ? {partial: true, kind: kindNow, categoryName: "Estoque produzido"} : {}));
   diffs.forEach(function(d){
     chain = chain.then(function(){
       return db.doc("stock/"+currentStoreId+"_"+d.pid).set({storeId:currentStoreId, productId:d.pid, quantity:d.q, updatedAt:Date.now()})
         .then(function(){
           return db.collection("movements").add({storeId:currentStoreId, storeName:storeName, productId:d.pid, productName:d.name,
             type: d.q > d.sys ? "entrada" : "saida", quantity: Math.abs(d.q - d.sys),
-            employeeId:currentEmployeeId, employeeName:currentEmployeeName, note:"Ajuste de contagem " + fmtDateShort(date), timestamp:Date.now()});
+            employeeId:currentEmployeeId, employeeName:currentEmployeeName, note:(kindNow ? "Contagem do produzido " : "Ajuste de contagem ") + fmtDateShort(date), timestamp:Date.now()});
         });
     });
   });
   chain.then(function(){
     networkCmvCache = {};
     closeSheet();
-    showToast("Contagem salva: " + fmtMoney(total) + (diffs.length ? " · " + diffs.length + " ajuste(s)" : ""));
+    showToast((kindNow ? "Contagem do produzido salva" : "Contagem salva: " + fmtMoney(total)) + (diffs.length ? " · " + diffs.length + " ajuste(s)" : " · sem diferenças"));
     if (noCost) setTimeout(function(){ showToast(noCost + " produto(s) contado(s) sem custo cadastrado — valor não entra no CMV"); }, 2500);
   }).catch(function(err){
     showToast("Erro ao salvar contagem: " + errMsg(err)); btn.disabled = false; btn.textContent = "✓ Finalizar contagem completa";
@@ -1875,6 +2009,7 @@ function renderProdutos() {
         html += '<div class="card" data-open="' + esc(p.id) + '"><div class="info"><div class="name">' + esc(p.name) + '</div>' +
           '<div class="meta">' + (w ? w + " · " : "") + typeLabel(p.unit) + '</div>' +
           (productStoresLabel(p) ? '<div class="meta" style="color:var(--accent);font-weight:600;">🏬 ' + esc(productStoresLabel(p)) + '</div>' : '') +
+          (p.prodType ? '<div class="meta"><span class="kind-tag kind-' + p.prodType + '">' + (p.prodType === "produzido" ? "🔪 Produzido" : "📥 Não produzido") + '</span></div>' : '') +
           (!p.cost ? '<span class="badge-low">Sem custo</span>' : '') + '</div>' +
           '<div class="qty-block"><div class="qty">' + fmtMoney(p.cost||0) + '</div><div class="unit">por ' + typeLabel(p.unit).toLowerCase() + '</div></div></div>';
       });
@@ -1939,6 +2074,9 @@ function openProductForm(id) {
     '</div>' +
     '<div class="field"><label id="pCostLabel">Custo do produto (R$ por ' + typeLabel(curType).toLowerCase() + ')*</label><input type="number" inputmode="decimal" id="pCost" placeholder="0,00" value="' + (p&&p.cost?esc(p.cost):"") + '" min="0" step="0.01" ' + dis + '></div>' +
     '<div class="field"><label>Gênero</label><select id="pCat" ' + dis + '>' + categoryOptionsHtml(p?p.categoryId:"") + '</select></div>' +
+    '<div class="field"><label>Área no estoque</label><select id="pProdType" ' + dis + '>' +
+      PROD_KIND_OPTS.map(function(o){ return '<option value="' + o.v + '"' + (((p && p.prodType) || "") === o.v ? ' selected' : '') + '>' + o.l + '</option>'; }).join("") + '</select>' +
+      '<div id="pProdTypeInfo" style="font-size:11.5px;color:var(--text-2);margin-top:4px;"></div></div>' +
     '<div class="field"><label>Lojas que usam este produto</label>' +
       '<div style="font-size:11.5px;color:var(--text-2);margin:-2px 0 8px 0;">Nenhuma marcada = <b>todas as lojas</b>. O Estoque Central sempre vê todos os produtos.</div>' +
       '<div class="chip-group" id="pStores">' + storeOrder.filter(function(sid){ return stores[sid] && !stores[sid].isCentral; }).map(function(sid){
@@ -1960,6 +2098,14 @@ function openProductForm(id) {
   var bphi = document.getElementById("bPHist"); if (bphi) bphi.addEventListener("click", function(){ openProductHistory(id); });
   if (readOnly) return;
   var pStoreSel = (p && p.storeIds) ? p.storeIds.slice() : [];
+  function pKindInfo() {
+    var k = document.getElementById("pProdType"), el = document.getElementById("pProdTypeInfo"); if (!k || !el) return;
+    var u = document.getElementById("pUnit") ? document.getElementById("pUnit").value : "";
+    el.innerHTML = PROD_KIND_HELP[k.value] + (k.value === "bruto" && u !== "kg" ? ' <span style="color:var(--amber);font-weight:700;">Dica: use o tipo Kg.</span>' : '');
+  }
+  pKindInfo();
+  document.getElementById("pProdType").addEventListener("change", pKindInfo);
+  document.getElementById("pUnit").addEventListener("change", pKindInfo);
   function pStoresInfo() {
     var el = document.getElementById("pStoresInfo"); if (!el) return;
     el.textContent = pStoreSel.length ? "Somente: " + pStoreSel.map(function(s){ return stores[s] ? stores[s].name : ""; }).join(", ") : "Todas as lojas";
@@ -1991,7 +2137,8 @@ function openProductForm(id) {
       sku: document.getElementById("pSku").value.trim(),
       minStock: parseFloat(document.getElementById("pMin").value) || 0,
       perishable: document.getElementById("pPer").checked,
-      storeIds: storeOrder.filter(function(s){ return pStoreSel.indexOf(s) !== -1; })
+      storeIds: storeOrder.filter(function(s){ return pStoreSel.indexOf(s) !== -1; }),
+      prodType: document.getElementById("pProdType").value || ""
     };
     var btn = document.getElementById("bSave");
     if (!p) {
@@ -2017,12 +2164,13 @@ function openProductForm(id) {
 }
 
 // ---------- Alteração/exclusão de produto: senha da Diretoria + motivo + histórico ----------
-var PRODUCT_FIELD_LABELS = {name:"Nome", weight:"Peso", weightUnit:"Unidade do peso", unit:"Tipo", cost:"Custo", categoryId:"Gênero", sku:"Código", minStock:"Estoque mínimo", perishable:"Perecível", storeIds:"Lojas"};
+var PRODUCT_FIELD_LABELS = {prodType:"Área no estoque", name:"Nome", weight:"Peso", weightUnit:"Unidade do peso", unit:"Tipo", cost:"Custo", categoryId:"Gênero", sku:"Código", minStock:"Estoque mínimo", perishable:"Perecível", storeIds:"Lojas"};
 function productFieldText(f, v) {
   if (f === "categoryId") return v && categories[v] ? categories[v].name : "Sem gênero";
   if (f === "unit") return typeLabel(v);
   if (f === "cost") return fmtMoney(v || 0);
   if (f === "perishable") return v ? "Sim" : "Não";
+  if (f === "prodType") return prodKindLabel(v);
   if (f === "storeIds") return v && v.length ? v.map(function(s){ return stores[s] ? stores[s].name : "?"; }).join(", ") : "Todas as lojas";
   if (v === null || v === undefined || v === "") return "—";
   return String(v);
@@ -2034,6 +2182,7 @@ function productChanges(p, data) {
     if (f === "weight" || f === "cost" || f === "minStock") { a = parseFloat(a) || 0; b = parseFloat(b) || 0; }
     else if (f === "perishable") { a = !!a; b = !!b; }
     else if (f === "storeIds") { a = (a || []).slice().sort().join(","); b = (b || []).slice().sort().join(","); }
+    else if (f === "prodType") { a = a || ""; b = b || ""; }
     else { a = (a === undefined || a === null) ? "" : a; b = (b === undefined || b === null) ? "" : b; }
     if (f === "weightUnit" && !(parseFloat(data.weight) > 0) && !(parseFloat(p.weight) > 0)) return;
     if (a !== b) out.push({field:f, label:PRODUCT_FIELD_LABELS[f], from:productFieldText(f, p[f]), to:productFieldText(f, data[f])});
