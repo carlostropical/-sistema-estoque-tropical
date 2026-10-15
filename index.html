@@ -145,6 +145,16 @@
   .pill-mao_de_obra { background:var(--red-bg); color:var(--red); }
   .pill-mercadoria { background:var(--green-bg); color:var(--green); }
   .pill-outro { background:var(--surface-2); color:var(--text-2); }
+  .pill-impostos { background:#e8eefc; color:#3554a5; }
+  .cst-pillar { border:1px solid var(--border); border-radius:12px; background:var(--surface); margin-bottom:10px; overflow:hidden; }
+  .cst-ph { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:12px 14px; }
+  .cst-ph b { font-size:16px; white-space:nowrap; } .cst-ph small { color:var(--text-2); font-size:12px; margin-left:6px; }
+  .cst-sub { display:flex; justify-content:space-between; gap:8px; padding:9px 14px; border-top:1px solid var(--border); font-size:14px; cursor:pointer; }
+  .cst-sub span small { color:var(--text-2); font-size:11.5px; margin-left:4px; } .cst-sub b { white-space:nowrap; }
+  .cst-items { background:var(--surface-2); }
+  .cst-item { display:flex; justify-content:space-between; gap:8px; padding:8px 14px 8px 26px; border-top:1px solid var(--border); font-size:13px; }
+  .cst-item small { display:block; color:var(--text-2); font-size:11.5px; }
+  .cst-bar { height:4px; background:var(--surface-2); } .cst-bar i { display:block; height:4px; background:var(--accent); }
 
   .empty-state { text-align:center; color:var(--text-2); padding:50px 20px; font-size:14px; }
   .empty-state .emoji { font-size:34px; margin-bottom:10px; }
@@ -416,6 +426,7 @@ var PILLARS = [
   {v:"aluguel", l:"Aluguel"},
   {v:"mao_de_obra", l:"Mão de obra"},
   {v:"mercadoria", l:"Mercadoria"},
+  {v:"impostos", l:"Impostos"},
   {v:"outro", l:"Outro"}
 ];
 var UNITS = ["un","kg","g","L","ml","cx","pct"];
@@ -3669,43 +3680,95 @@ function submitPurchase() {
 // CUSTOS
 // ============================================================
 var custosMonth = currentMonthStr();
+var DEFAULT_COST_SUBGROUPS = {
+  fixo: ["Energia", "Água", "Telefonia", "Internet", "Sistemas"],
+  variavel: ["Manutenções", "Seguros", "Investimentos"],
+  aluguel: ["Locação", "Fundo de promoção", "Acordos de locação"],
+  mao_de_obra: ["Fixos", "Motoboys", "Comissões garçons", "Prêmios", "Freelancers", "Férias", "FGTS"],
+  mercadoria: ["Alimentos diversos", "Carnes", "Bebidas"],
+  impostos: [],
+  outro: []
+};
+var costSubs = null, costOpen = {};
+function costSubgroups(pl) { var s = (costSubs || DEFAULT_COST_SUBGROUPS)[pl]; return Array.isArray(s) ? s : (DEFAULT_COST_SUBGROUPS[pl] || []); }
+function canManageCostSubs() { var r = currentRole(); return r === "Gerência" || r === "Diretoria"; }
+function loadCostSubs(cb) {
+  db.doc("meta/costSubgroups").get().then(function(s){
+    costSubs = s.exists && s.data().groups ? s.data().groups : JSON.parse(JSON.stringify(DEFAULT_COST_SUBGROUPS));
+    if (cb) cb();
+  }).catch(function(){ costSubs = JSON.parse(JSON.stringify(DEFAULT_COST_SUBGROUPS)); if (cb) cb(); });
+}
+function saveCostSubs(groups) {
+  var ref = db.doc("meta/costSubgroups"), data = {groups: groups, updatedAt: Date.now(), updatedBy: currentEmployeeName || ""};
+  return ref.get().then(function(s){ return s.exists ? ref.update(data) : ref.set(data); }).then(function(){ costSubs = groups; });
+}
 function renderCustos() {
   if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
+  if (!costSubs) { content.innerHTML = '<div class="loading-msg">Carregando custos…</div>'; loadCostSubs(function(){ if (currentRoute === "custos") renderCustos(); }); return; }
   var filtered = scopedCosts.filter(function(c){ return c.month===custosMonth; });
   var total = filtered.reduce(function(s,c){return s+(c.amount||0);},0);
-  var byPillar = {};
-  filtered.forEach(function(c){ byPillar[c.pillar] = (byPillar[c.pillar]||0) + (c.amount||0); });
-
-  var html = '<div class="section-head"><h2>Custos</h2><button class="btn btn-primary btn-sm" id="bAdd">+ Novo</button></div>';
+  var html = '<div class="section-head"><h2>Custos</h2><div style="display:flex;gap:12px;align-items:center;">' +
+    (canManageCostSubs() ? '<button class="link-btn" id="bCostSubs">⚙ Subgrupos</button>' : '') +
+    '<button class="btn btn-primary btn-sm" id="bAdd">+ Novo</button></div></div>';
   html += '<div class="field"><label>Mês</label><input type="month" id="custMonth" value="' + custosMonth + '"></div>';
-  html += '<div class="stat-grid"><div class="stat-box wide"><div class="num">' + fmtMoney(total) + '</div><div class="label">total de custos no mês</div></div></div>';
-  html += '<div style="margin-bottom:12px;">' + PILLARS.map(function(pl){
-    return '<span class="pill pill-' + pl.v + '" style="margin:0 6px 6px 0;">' + pl.l + ': ' + fmtMoney(byPillar[pl.v]||0) + '</span>';
-  }).join("") + '</div>';
-
-  if (filtered.length===0) {
+  html += '<div class="stat-grid"><div class="stat-box wide"><div class="num">' + fmtMoney(total) + '</div><div class="label">total de custos no mês · ' + esc(stores[currentStoreId] ? stores[currentStoreId].name : "") + '</div></div></div>';
+  if (!filtered.length) {
     html += '<div class="empty-state"><div class="emoji">💰</div>Nenhum custo lançado neste mês.</div>';
-  } else {
-    filtered.sort(function(a,b){return b.createdAt-a.createdAt;}).forEach(function(c){
-      html += '<div class="move-item"><div class="move-icon perda">💸</div><div class="move-body">' +
-        '<div class="move-title">' + esc(c.label||pillarLabel(c.pillar)) + '</div>' +
-        '<div class="move-sub"><span class="pill pill-' + c.pillar + '">' + pillarLabel(c.pillar) + '</span></div></div>' +
-        '<div class="move-qty saida">' + fmtMoney(c.amount) + '</div></div>';
-    });
   }
+  PILLARS.forEach(function(pl){
+    var list = filtered.filter(function(c){ return (c.pillar || "outro") === pl.v; });
+    if (!list.length) return;
+    var pt = list.reduce(function(s,c){ return s + (c.amount||0); }, 0);
+    var subs = {}, order = costSubgroups(pl.v).slice();
+    list.forEach(function(c){ var k = c.subgroup || "Sem subgrupo"; (subs[k] = subs[k] || []).push(c); if (order.indexOf(k) === -1) order.push(k); });
+    html += '<div class="cst-pillar"><div class="cst-ph"><span class="pill pill-' + pl.v + '">' + pl.l + '</span><span><b>' + fmtMoney(pt) + '</b><small>' + (total ? Math.round(pt / total * 100) : 0) + '%</small></span></div>' +
+      '<div class="cst-bar"><i style="width:' + (total ? (pt / total * 100).toFixed(1) : 0) + '%;"></i></div>';
+    order.forEach(function(k){
+      var items = subs[k]; if (!items) return;
+      var st = items.reduce(function(s,c){ return s + (c.amount||0); }, 0), key = pl.v + "|" + k;
+      html += '<div class="cst-sub" data-cst="' + esc(key) + '"><span>' + (costOpen[key] ? "▾ " : "▸ ") + esc(k) + '<small>(' + items.length + ')</small></span><b>' + fmtMoney(st) + '</b></div>';
+      if (costOpen[key]) {
+        html += '<div class="cst-items">' + items.sort(function(a,b){ return (b.createdAt||0) - (a.createdAt||0); }).map(function(c){
+          return '<div class="cst-item"><span>' + esc(c.label || k) + '<small>' + (c.createdAt ? fmtDate(c.createdAt) : '') + (c.employeeName ? ' · ' + esc(c.employeeName) : '') + '</small></span><b>' + fmtMoney(c.amount) + '</b></div>';
+        }).join("") + '</div>';
+      }
+    });
+    html += '</div>';
+  });
   content.innerHTML = html;
-  document.getElementById("bAdd").addEventListener("click", openCostForm);
+  document.getElementById("bAdd").addEventListener("click", function(){ openCostForm(); });
+  var bs = document.getElementById("bCostSubs"); if (bs) bs.addEventListener("click", openCostSubgroups);
   document.getElementById("custMonth").addEventListener("change", function(e){ custosMonth = e.target.value; subscribeScoped("custos"); });
+  content.querySelectorAll("[data-cst]").forEach(function(r){ r.addEventListener("click", function(){ var k = r.getAttribute("data-cst"); costOpen[k] = !costOpen[k]; renderCustos(); }); });
 }
-function openCostForm() {
+function openCostForm(pre) {
   if (!requireOperator()) return;
+  pre = pre || {};
+  var pillar = pre.pillar || "fixo";
+  function subOpts(pl, sel) {
+    return '<option value="">— Sem subgrupo —</option>' + costSubgroups(pl).map(function(s){ return '<option' + (s === sel ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join("");
+  }
   var html = '<h2>Novo custo</h2>' +
-    '<div class="field"><label>Pilar</label><select id="cPillar">' + PILLARS.map(function(pl){return '<option value="'+pl.v+'">'+pl.l+'</option>';}).join("") + '</select></div>' +
-    '<div class="field"><label>Descrição</label><input type="text" id="cLabel" placeholder="Ex: Conta de luz"></div>' +
-    '<div class="row2"><div class="field"><label>Valor</label><input type="number" inputmode="decimal" id="cAmount" min="0" step="any" placeholder="0,00"></div>' +
+    '<div class="row2"><div class="field"><label>Pilar</label><select id="cPillar">' + PILLARS.map(function(pl){return '<option value="'+pl.v+'"' + (pl.v === pillar ? ' selected' : '') + '>'+pl.l+'</option>';}).join("") + '</select></div>' +
+    '<div class="field"><label>Subgrupo</label><select id="cSub">' + subOpts(pillar, pre.subgroup) + '</select></div></div>' +
+    (canManageCostSubs() ? '<button class="link-btn" id="cNewSub" type="button" style="margin:-6px 0 10px 0;">+ Cadastrar novo subgrupo neste pilar</button>' : '') +
+    '<div class="field"><label>Descrição</label><input type="text" id="cLabel" placeholder="Ex: Conta de luz de outubro" value="' + esc(pre.label || "") + '"></div>' +
+    '<div class="row2"><div class="field"><label>Valor</label><input type="number" inputmode="decimal" id="cAmount" min="0" step="any" placeholder="0,00" value="' + (pre.amount || "") + '"></div>' +
     '<div class="field"><label>Mês</label><input type="month" id="cMonth" value="' + custosMonth + '"></div></div>' +
     '<button class="btn btn-primary" id="bSave">Salvar</button><button class="btn btn-secondary" id="bCancel">Cancelar</button>';
   openSheet(html);
+  var pSel = document.getElementById("cPillar"), sSel = document.getElementById("cSub");
+  pSel.addEventListener("change", function(){ sSel.innerHTML = subOpts(pSel.value, ""); });
+  var ns = document.getElementById("cNewSub");
+  if (ns) ns.addEventListener("click", function(){
+    var name = (window.prompt("Nome do novo subgrupo em " + pillarLabel(pSel.value) + ":") || "").trim();
+    if (!name) return;
+    var groups = JSON.parse(JSON.stringify(costSubs || DEFAULT_COST_SUBGROUPS)), arr = groups[pSel.value] = groups[pSel.value] || [];
+    if (arr.some(function(x){ return x.toLowerCase() === name.toLowerCase(); })) { showToast("Esse subgrupo já existe"); return; }
+    arr.push(name);
+    saveCostSubs(groups).then(function(){ sSel.innerHTML = subOpts(pSel.value, name); showToast("Subgrupo cadastrado"); })
+      .catch(function(err){ showToast("Erro: " + errMsg(err)); });
+  });
   document.getElementById("bCancel").addEventListener("click", closeSheet);
   document.getElementById("bSave").addEventListener("click", function(){
     var amount = parseFloat(document.getElementById("cAmount").value);
@@ -3713,12 +3776,53 @@ function openCostForm() {
     var storeName = stores[currentStoreId] ? stores[currentStoreId].name : "";
     var btn = document.getElementById("bSave"); btn.disabled=true; btn.textContent="Salvando…";
     db.collection("costs").add({
-      storeId:currentStoreId, storeName:storeName, pillar:document.getElementById("cPillar").value,
+      storeId:currentStoreId, storeName:storeName, pillar:pSel.value, subgroup:sSel.value || "",
       label:document.getElementById("cLabel").value.trim(), amount:amount, month:document.getElementById("cMonth").value,
       employeeId:currentEmployeeId, employeeName:currentEmployeeName, createdAt:Date.now()
     }).then(function(){ closeSheet(); showToast("Custo lançado"); })
       .catch(function(){ showToast("Erro ao salvar"); btn.disabled=false; btn.textContent="Salvar"; });
   });
+}
+// Cadastro dos subgrupos (Gerência e Diretoria) — vale para todas as lojas
+function openCostSubgroups() {
+  if (!canManageCostSubs()) return;
+  var groups = JSON.parse(JSON.stringify(costSubs || DEFAULT_COST_SUBGROUPS));
+  PILLARS.forEach(function(pl){ if (!Array.isArray(groups[pl.v])) groups[pl.v] = []; });
+  function draw() {
+    var h = '<h2>⚙ Subgrupos de custo</h2><div class="sub">Valem para todas as lojas. Remover um subgrupo não apaga custos já lançados nele.</div>';
+    PILLARS.forEach(function(pl){
+      h += '<div style="margin:14px 0 6px 0;"><span class="pill pill-' + pl.v + '">' + pl.l + '</span></div>';
+      if (!groups[pl.v].length) h += '<div style="font-size:12.5px;color:var(--text-2);margin-bottom:6px;">Nenhum subgrupo.</div>';
+      groups[pl.v].forEach(function(s, i){
+        h += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px;">' +
+          '<input type="text" data-sgp="' + pl.v + '" data-sgi="' + i + '" value="' + esc(s) + '" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:14px;">' +
+          '<button class="link-btn" data-sgup="' + pl.v + '|' + i + '"' + (i === 0 ? ' disabled' : '') + ' style="padding:0 4px;">↑</button>' +
+          '<button class="link-btn link-danger" data-sgrm="' + pl.v + '|' + i + '" style="padding:0 4px;">✕</button></div>';
+      });
+      h += '<div style="display:flex;gap:6px;"><input type="text" data-sgnew="' + pl.v + '" placeholder="Novo subgrupo em ' + esc(pl.l) + '" style="flex:1;padding:8px;border-radius:8px;border:1px dashed var(--border);background:var(--surface);color:var(--text);font-size:14px;">' +
+        '<button class="btn btn-secondary btn-sm" data-sgadd="' + pl.v + '" style="width:auto;">+</button></div>';
+    });
+    h += '<button class="btn btn-primary" id="sgSave" style="margin-top:14px;">Salvar subgrupos</button><button class="btn btn-secondary" id="sgCancel">Cancelar</button>';
+    openSheet(h);
+    sheet.querySelectorAll("[data-sgi]").forEach(function(inp){ inp.addEventListener("input", function(){ groups[inp.getAttribute("data-sgp")][+inp.getAttribute("data-sgi")] = inp.value; }); });
+    sheet.querySelectorAll("[data-sgrm]").forEach(function(b){ b.addEventListener("click", function(){ var a = b.getAttribute("data-sgrm").split("|"); groups[a[0]].splice(+a[1], 1); draw(); }); });
+    sheet.querySelectorAll("[data-sgup]").forEach(function(b){ b.addEventListener("click", function(){ var a = b.getAttribute("data-sgup").split("|"), arr = groups[a[0]], i = +a[1]; if (i > 0) { var t = arr[i]; arr[i] = arr[i-1]; arr[i-1] = t; draw(); } }); });
+    sheet.querySelectorAll("[data-sgadd]").forEach(function(b){ b.addEventListener("click", function(){
+      var pl = b.getAttribute("data-sgadd"), inp = sheet.querySelector('[data-sgnew="' + pl + '"]'), v = (inp.value || "").trim();
+      if (!v) { showToast("Digite o nome do subgrupo"); return; }
+      if (groups[pl].some(function(x){ return x.toLowerCase() === v.toLowerCase(); })) { showToast("Esse subgrupo já existe"); return; }
+      groups[pl].push(v); draw();
+    }); });
+    document.getElementById("sgCancel").addEventListener("click", closeSheet);
+    document.getElementById("sgSave").addEventListener("click", function(){
+      var clean = {};
+      Object.keys(groups).forEach(function(k){ var seen = {}; clean[k] = groups[k].map(function(s){ return String(s || "").trim(); }).filter(function(s){ var l = s.toLowerCase(); if (!s || seen[l]) return false; seen[l] = 1; return true; }); });
+      var btn = document.getElementById("sgSave"); btn.disabled = true; btn.textContent = "Salvando…";
+      saveCostSubs(clean).then(function(){ closeSheet(); showToast("Subgrupos salvos"); if (currentRoute === "custos") renderCustos(); })
+        .catch(function(err){ btn.disabled = false; btn.textContent = "Salvar subgrupos"; showToast("Erro: " + errMsg(err)); });
+    });
+  }
+  draw();
 }
 
 // ============================================================
