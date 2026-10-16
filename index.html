@@ -628,6 +628,10 @@ function navigate(route) {
 
 function renderRoute() {
   if (isFridgeOnly() && currentRoute !== "geladeira") { navigate("geladeira"); return; }
+  if (ROUTES[currentRoute] && ROUTES[currentRoute].storeScoped && storeOrder.length && storeRestricted() && !allowedStoreIds().length) {
+    content.innerHTML = '<div class="empty-state"><div class="emoji">🏬</div>Seu usuário ainda não está vinculado a nenhuma loja.<br>Peça para a Diretoria marcar a sua loja em <b>Funcionários → Lojas vinculadas</b>.</div>';
+    return;
+  }
   switch (currentRoute) {
     case "painel": return renderPainel();
     case "estoque": return renderEstoque();
@@ -651,10 +655,26 @@ function renderRoute() {
 // ============================================================
 // STORE SELECTOR + OPERATOR BAR
 // ============================================================
+function storeRestricted() { var r = currentRole(); return !!currentEmployeeId && r !== "Diretoria" && r !== "Gerência"; }
+function allowedStoreIds() {
+  if (!storeRestricted()) return storeOrder.slice();
+  if (currentRole() === "Operador de Estoque") return storeOrder.filter(function(s){ return stores[s] && stores[s].isCentral; });
+  var e = employees[currentEmployeeId] || {}, mine = e.storeIds || [];
+  return storeOrder.filter(function(s){ return mine.indexOf(s) !== -1; });
+}
+function storeAllowed(sid) { return allowedStoreIds().indexOf(sid) !== -1; }
+// devolve true se a loja atual precisou ser trocada
 function renderStoreSelect() {
-  storeSelect.innerHTML = storeOrder.map(function(id){
+  var list = allowedStoreIds(), changed = false;
+  if (storeOrder.length && currentEmployeeId && employees[currentEmployeeId] && list.indexOf(currentStoreId) === -1) {
+    currentStoreId = list[0] || null; changed = true;
+    if (currentStoreId) lsSet("currentStoreId", currentStoreId);
+  }
+  storeSelect.innerHTML = list.length ? list.map(function(id){
     return '<option value="' + id + '"' + (id===currentStoreId?" selected":"") + '>' + esc(stores[id].name) + '</option>';
-  }).join("");
+  }).join("") : '<option value="">Sem loja vinculada</option>';
+  storeSelect.disabled = list.length <= 1;
+  return changed;
 }
 storeSelect.addEventListener("change", function () {
   currentStoreId = storeSelect.value;
@@ -664,6 +684,7 @@ storeSelect.addEventListener("change", function () {
 
 function renderOpBar() {
   syncDrawer();
+  if (storeOrder.length && renderStoreSelect() && ROUTES[currentRoute] && ROUTES[currentRoute].storeScoped) setTimeout(function(){ subscribeScoped(currentRoute); }, 0);
   var name = currentEmployeeName || "—";
   var e = currentEmployeeId ? employees[currentEmployeeId] : null;
   var roleTxt = e && e.role ? ' <span style="color:var(--text-2)">(' + esc(e.role) + ')</span>' : '';
@@ -2608,7 +2629,8 @@ function openEmployeeForm(id) {
     '<input type="checkbox" id="eFridge" style="display:none;" ' + (e&&e.fridgeAccess?"checked":"") + '>' +
     '<div style="font-size:11.5px;color:var(--text-2);margin:-6px 0 12px 0;">🧊 Todos os funcionários podem fazer a Contagem de geladeira. A função <b>Contagem de Geladeira</b> dá acesso <b>somente</b> a esta tela.</div>' +
     '<div class="field"><label>Lojas vinculadas</label><div class="chip-group" id="eStores">' +
-    storeOrder.map(function(sid){ return '<div class="chip' + (storeIds.indexOf(sid)!==-1?" selected":"") + '" data-sid="' + sid + '">' + esc(stores[sid].name) + '</div>'; }).join("") + '</div></div>' +
+    storeOrder.map(function(sid){ return '<div class="chip' + (storeIds.indexOf(sid)!==-1?" selected":"") + '" data-sid="' + sid + '">' + esc(stores[sid].name) + '</div>'; }).join("") + '</div>' +
+    '<div style="font-size:11.5px;color:var(--text-2);margin-top:6px;">🔒 O funcionário só faz pedidos e lançamentos nas lojas marcadas. <b>Operador de Estoque</b> lança só no Estoque Central; <b>Gerência</b> e <b>Diretoria</b> em todas.</div></div>' +
     (e && !readOnly ? employeeAccessHtml(e) : (e && e.login ? '<div class="sub">Usuário de acesso: <b>' + esc(e.login) + '</b></div>' : '')) +
     (readOnly ? '' : '<button class="btn btn-primary" id="bSave">Salvar</button>' +
       (e?'<button class="btn btn-secondary" id="bDel">Excluir</button>':'')) +
@@ -3294,6 +3316,7 @@ function openReceiveSupplierOrder(o) {
 function shipmentStatusBadge(s) {
   if (s.status==="recebido") return '<span class="badge-low status-concluida">Recebido</span>';
   if (s.status==="recebido_com_divergencia") return '<span class="badge-low" style="color:var(--red);background:var(--red-bg);">Divergência</span>';
+  if (s.status==="cancelado") return '<span class="badge-low" style="color:var(--text-2);background:var(--surface-2);">Cancelado</span>';
   return '<span class="badge-low status-pendente">Em trânsito</span>';
 }
 function shipmentKindLabel(s) { return s.kind==="devolucao" ? "Devolução" : "Pedido"; }
