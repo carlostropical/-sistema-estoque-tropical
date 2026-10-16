@@ -343,6 +343,8 @@
 .topic-empty { font-size:13px; color:var(--text-2); padding:6px 2px; }
 .rr-hint { font-size:12.5px; color:var(--text-2); margin:0 0 6px 2px; line-height:1.35; }
 .rr-new { font-style:normal; font-size:11px; font-weight:700; color:var(--accent); margin-left:4px; }
+.recv-wait { background:var(--amber-bg); border:1px solid var(--amber); border-radius:10px; padding:10px 12px; font-size:13px; line-height:1.4; }
+.recv-wait .t { display:block; margin-bottom:3px; }
 </style>
 </head>
 <body class="locked">
@@ -3067,6 +3069,8 @@ function openOrderDetail(id) {
   var canFulfill = o.status==="pendente" && o.targetStoreId===currentStoreId && ["Operador de Estoque","Diretoria"].indexOf(role)!==-1;
   var canReceiveSup = o.status==="pendente" && o.supplierId && o.storeId===currentStoreId && canSeeSuppliers();
   var canCancel = o.status==="pendente" && (canEditDelete() || o.createdBy===currentEmployeeId);
+  if (o.status === "pendente" && !o.supplierId && o.storeId === currentStoreId && !canFulfill)
+    html += '<div class="recv-wait" style="margin-top:8px;">⏳ <b>Aguardando o Estoque Central</b> atender e confirmar a entrega. Depois disso, a loja recebe em <b>📥 Receber mercadoria</b>.</div>';
   if (canFulfill) html += '<button class="btn btn-primary" id="bFulfill">🚚 Atender pedido</button>';
   if (canReceiveSup) html += '<button class="btn btn-entrada" id="bRecvSup">📥 Receber do fornecedor</button>';
   if (canCancel) html += '<button class="btn btn-secondary" id="bCancelOrder">Cancelar pedido</button>';
@@ -3405,9 +3409,29 @@ function submitShipment() {
 }
 
 // ---- Receber mercadoria (loja recebe pedido, ou central recebe devolução) ----
+function explainNothingToReceive(isCentral) {
+  var waiting = scopedOrdersMine.filter(function(o){ return o.status === "pendente" && !o.supplierId; })
+    .sort(function(a,b){ return (b.createdAt||0) - (a.createdAt||0); });
+  var html = '<h2>📥 Receber mercadoria</h2>';
+  if (waiting.length && !isCentral) {
+    html += '<div class="recv-wait"><b class="t">Ainda não há entrega para receber.</b>O Estoque Central precisa primeiro <b>atender</b> o pedido e tocar em <b>✓ Confirmar entrega</b>. ' +
+      'Assim que ele confirmar, a entrega aparece aqui para você conferir.</div>' +
+      '<div class="chart-title" style="margin-top:12px;">Aguardando o Estoque Central</div>' +
+      waiting.map(function(o){
+        return '<div class="item-row" data-wait="' + o.id + '" style="cursor:pointer;"><b>' + esc(orderLabel(o)) + '</b>' +
+          '<div style="font-size:12.5px;color:var(--text-2);">Entrega prevista ' + fmtDateShort(o.deliveryDate) + (o.deliveryTime ? ' às ' + esc(o.deliveryTime) : '') + ' · ' + (o.items ? o.items.length : 0) + ' item(ns)</div></div>';
+      }).join("");
+  } else {
+    html += '<div class="empty-state" style="padding:20px 6px;"><div class="emoji">📭</div>Nenhuma mercadoria enviada para ' + esc(stores[currentStoreId] ? stores[currentStoreId].name : "esta loja") + ' aguardando recebimento.</div>';
+  }
+  html += '<button class="btn btn-secondary" id="bRwClose" style="margin-top:12px;">Fechar</button>';
+  openSheet(html);
+  document.getElementById("bRwClose").addEventListener("click", closeSheet);
+  sheet.querySelectorAll("[data-wait]").forEach(function(r){ r.addEventListener("click", function(){ openOrderDetail(r.getAttribute("data-wait")); }); });
+}
 function openReceiveShipmentPicker(pending, isCentral) {
   if (!requireRole(isCentral ? ["Operador de Estoque","Diretoria"] : ["Operador de Loja","Diretoria"])) return;
-  if (pending.length===0) { showToast("Nenhuma mercadoria pendente para receber"); return; }
+  if (pending.length===0) { explainNothingToReceive(isCentral); return; }
   var html = '<h2>Receber mercadoria</h2><div class="sub">Selecione o que está recebendo</div>';
   pending.sort(function(a,b){return (b.sentAt||0)-(a.sentAt||0);}).forEach(function(s){
     html += '<div class="card" data-pick="' + s.id + '"><div class="info"><div class="name">' + shipmentKindLabel(s) + ' de: ' + esc(s.originStoreName) + '</div>' +
