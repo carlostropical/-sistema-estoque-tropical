@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261017162731">
+<meta name="app-build" content="20261017173113">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -348,6 +348,16 @@
 .recv-wait .t { display:block; margin-bottom:3px; }
 .central-opt { display:flex; gap:10px; align-items:flex-start; padding:11px 12px; margin:0 0 10px 0; border:1.5px solid #e8b931; background:var(--amber-bg); border-radius:10px; cursor:pointer; font-size:14px; line-height:1.35; }
 .central-opt input { width:20px; height:20px; margin-top:1px; flex:none; accent-color:#1f6f43; }
+.need-bar { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; background:var(--accent-2); margin:0 0 12px 0; }
+.need-bar b { display:block; font-size:13.5px; } .need-bar span { display:block; font-size:12px; color:var(--text-2); }
+.need-kpis { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+.need-kpis > div { border:1px solid var(--border); border-radius:12px; padding:10px 12px; background:var(--surface); }
+.need-kpis b { display:block; font-size:22px; } .need-kpis b.warn { color:var(--amber); } .need-kpis b.ok { color:var(--green); }
+.need-kpis span { font-size:12px; color:var(--text-2); }
+.need-tbl { width:100%; border-collapse:collapse; font-size:13.5px; margin:10px 0 6px 0; background:var(--surface); border-radius:10px; overflow:hidden; }
+.need-tbl th { text-align:left; font-size:11.5px; color:var(--text-2); padding:8px 8px; border-bottom:1px solid var(--border); }
+.need-tbl td { padding:9px 8px; border-bottom:1px solid var(--border); } .need-tbl .n { text-align:right; white-space:nowrap; }
+.need-tbl tr.need-low td { background:var(--amber-bg); }
 </style>
 </head>
 <body class="locked">
@@ -936,6 +946,50 @@ function bindProducao() {
   on("pdFrom", "change", function(e){ if (e.target.value) { s.from = e.target.value; renderProducao(); } });
   on("pdTo", "change", function(e){ if (e.target.value) { s.to = e.target.value; renderProducao(); } });
 }
+function prodProductSelect(idAttr, sel, dis, placeholder) {
+  var pids = storeProductOrder(currentStoreId);
+  var raw = pids.filter(function(pid){ return products[pid].prodType === "bruto" || products[pid].centralOnly; });
+  var groups = {}, order = [];
+  pids.forEach(function(pid){ if (raw.indexOf(pid) !== -1) return; var k = (products[pid].categoryId && categories[products[pid].categoryId]) ? products[pid].categoryId : "_none"; if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(pid); });
+  order.sort(function(a,b){ var na = a==="_none" ? "zzz" : categories[a].name, nb = b==="_none" ? "zzz" : categories[b].name; return na.localeCompare(nb, "pt-BR"); });
+  function opt(pid) { return '<option value="' + pid + '"' + (pid === sel ? ' selected' : '') + '>' + esc(products[pid].name) + ' (' + esc(products[pid].unit || "un") + ')</option>'; }
+  function byName(a,b){ return (products[a].name||"").localeCompare(products[b].name||"", "pt-BR"); }
+  return '<select id="' + idAttr + '"' + dis + '><option value="">' + placeholder + '</option>' +
+    (raw.length ? '<optgroup label="📥 Matéria-prima (não produzida)">' + raw.sort(byName).map(opt).join("") + '</optgroup>' : '') +
+    order.map(function(k){ return '<optgroup label="' + esc(k === "_none" ? "Sem gênero" : categories[k].name) + '">' + groups[k].sort(byName).map(opt).join("") + '</optgroup>'; }).join("") + '</select>';
+}
+// quantidades que a produção movimenta no estoque
+function prodStockLines(e) {
+  var out = [];
+  function q(pid, kg, un) { var p = products[pid]; if (!p) return 0; return p.unit === "un" ? (un || 0) : (kg || 0); }
+  if (e.rawProductId && products[e.rawProductId]) out.push({pid: e.rawProductId, type: "saida", qty: e.rawKg || 0, role: "insumo"});
+  if (e.filetProductId && products[e.filetProductId]) out.push({pid: e.filetProductId, type: "entrada", qty: q(e.filetProductId, e.filetKg, e.filetQty), role: "produzido"});
+  if (e.iscaProductId && products[e.iscaProductId] && e.iscaKg > 0) out.push({pid: e.iscaProductId, type: "entrada", qty: e.iscaKg || 0, role: "isca"});
+  return out.filter(function(l){ return l.qty > 0; });
+}
+// aplica (sign=1) ou estorna (sign=-1) a produção no estoque da loja
+function applyProdStock(e, sign, sid, prodId) {
+  var lines = prodStockLines(e), sname = stores[sid] ? stores[sid].name : "";
+  var chain = Promise.resolve();
+  lines.forEach(function(l){
+    chain = chain.then(function(){
+      var ref = db.doc("stock/" + sid + "_" + l.pid);
+      return ref.get().then(function(s){
+        var cur = s.exists ? (s.data().quantity || 0) : 0;
+        var delta = (l.type === "entrada" ? 1 : -1) * l.qty * sign;
+        var nq = Math.round((cur + delta) * 1000) / 1000;
+        return ref.set({storeId: sid, productId: l.pid, quantity: nq, updatedAt: Date.now()}).then(function(){
+          if (typeof scopedStock !== "undefined" && sid === currentStoreId) scopedStock[l.pid] = {storeId: sid, productId: l.pid, quantity: nq, updatedAt: Date.now()};
+          return db.collection("movements").add({storeId: sid, storeName: sname, productId: l.pid, productName: products[l.pid] ? products[l.pid].name : "",
+            type: delta >= 0 ? "entrada" : "saida", kind: "producao", productionId: prodId || "", quantity: Math.abs(delta),
+            employeeId: currentEmployeeId, employeeName: currentEmployeeName,
+            note: (sign < 0 ? "Estorno de produção · " : "Produção · ") + (e.templateName || "") + " · " + fmtDateShort(e.date) + " (" + l.role + ")", timestamp: Date.now()});
+        });
+      });
+    });
+  });
+  return chain;
+}
 function openProductionForm(id) {
   var e = id && prodData ? prodData.rows.filter(function(x){ return x.id === id; })[0] : null;
   var readOnly = !!e && currentRole() !== "Diretoria";
@@ -946,8 +1000,11 @@ function openProductionForm(id) {
   var html = '<h2>' + (e ? 'Produção — ' + esc(e.templateName) : '🔪 Lançar produção') + '</h2>' +
     '<div class="sub">' + esc(stores[currentStoreId].name) + (e ? ' · lançado por ' + esc(e.employeeName||"") + ' em ' + esc(fmtDate(e.createdAt)) : '') + '</div>' +
     (readOnly ? '<div class="sub" style="color:var(--amber);">Somente a Diretoria pode alterar ou excluir um lançamento de produção.</div>' : '') +
-    '<div class="field"><label>Produto produzido</label><div class="chip-group" id="pfTpls">' + tpls.map(function(t){
+    '<div class="field"><label>Modelo de produção</label><div class="chip-group" id="pfTpls">' + tpls.map(function(t){
       return '<div class="chip' + (t.id === tplId ? ' selected' : '') + '" data-pft="' + esc(t.id) + '"' + (readOnly ? ' style="pointer-events:none;"' : '') + '>' + esc(t.name) + '</div>'; }).join("") + '</div></div>' +
+    '<div class="field"><label>Insumo (matéria-prima)</label>' + prodProductSelect("pfRawP", e ? (e.rawProductId || "") : "", dis, "— escolha o insumo —") + '</div>' +
+    '<div class="row2"><div class="field"><label>Produto produzido</label>' + prodProductSelect("pfFilP", e ? (e.filetProductId || "") : "", dis, "— escolha —") + '</div>' +
+      '<div class="field"><label>Produto da isca (opcional)</label>' + prodProductSelect("pfIscP", e ? (e.iscaProductId || "") : "", dis, "— nenhum —") + '</div></div>' +
     '<div class="field"><label>Data</label><input type="date" id="pfDate" value="' + (e ? e.date : todayStr()) + '"' + dis + '></div>' +
     '<div class="field"><label>Peso do produto bruto (kg)*</label><input type="number" inputmode="decimal" min="0" step="any" id="pfRaw" value="' + num(e && e.rawKg) + '" placeholder="Ex: 10,5"' + dis + '></div>' +
     '<div class="row2"><div class="field"><label>Quantidade de filés (un)*</label><input type="number" inputmode="numeric" min="0" step="1" id="pfQty" value="' + num(e && e.filetQty) + '"' + dis + '></div>' +
@@ -956,6 +1013,7 @@ function openProductionForm(id) {
       '<div class="field"><label>Peso de descarte (kg)</label><input type="number" inputmode="decimal" min="0" step="any" id="pfDsc" value="' + num(e && e.discardKg) + '"' + dis + '></div></div>' +
     '<div id="pfCalc" class="item-row" style="font-size:13px;"></div>' +
     '<div class="field"><label>Observação (opcional)</label><input type="text" id="pfNote" value="' + esc(e && e.note || "") + '" placeholder="Ex: lote, fornecedor, quem porcionou"' + dis + '></div>' +
+    '<label class="central-opt" style="' + (readOnly ? 'pointer-events:none;opacity:.8;' : '') + '"><input type="checkbox" id="pfStock"' + ((!e || e.stockMoved) ? ' checked' : '') + dis + '> <span><b>📦 Lançar no estoque</b><br><small style="color:var(--text-2);" id="pfStockInfo"></small></span></label>' +
     (readOnly ? '' : '<button class="btn btn-primary" id="pfSave">' + (e ? 'Salvar alteração' : 'Salvar produção') + '</button>' + (e ? '<button class="btn btn-secondary" id="pfDel" style="color:var(--red);">Excluir lançamento</button>' : '')) +
     '<button class="btn btn-secondary" id="pfCancel">' + (readOnly ? 'Fechar' : 'Cancelar') + '</button>';
   openSheet(html);
@@ -971,32 +1029,59 @@ function openProductionForm(id) {
       '<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:4px;padding-top:4px;"><span>Diferença não registrada</span><b style="color:' + (k.diff < -0.0005 ? 'var(--red)' : (k.diff > 0.0005 ? 'var(--amber)' : 'var(--green)')) + ';">' + fmtKg(k.diff) + ' (' + fmtPct(k.pDiff) + ')</b></div>' +
       (k.diff < -0.0005 ? '<div style="color:var(--red);font-size:12px;margin-top:4px;">⚠ Filés + iscas + descarte passam do peso bruto. Confira os pesos.</div>' : '');
   }
-  calc();
-  ["pfRaw","pfQty","pfFil","pfIsc","pfDsc"].forEach(function(i){ document.getElementById(i).addEventListener("input", calc); });
+  function stockInfo() {
+    var el = document.getElementById("pfStockInfo"); if (!el) return;
+    var ent = {rawProductId: document.getElementById("pfRawP").value, filetProductId: document.getElementById("pfFilP").value, iscaProductId: document.getElementById("pfIscP").value,
+      rawKg: val("pfRaw"), filetKg: val("pfFil"), filetQty: Math.round(val("pfQty")), iscaKg: val("pfIsc")};
+    var ls = prodStockLines(ent);
+    el.innerHTML = ls.length ? ls.map(function(l){ var p = products[l.pid]; return (l.type === "saida" ? "➖ baixa " : "➕ entrada ") + fmtQty(l.qty) + " " + esc(p.unit || "un") + " de " + esc(p.name); }).join("<br>")
+      : "Escolha o insumo e o produto produzido para o sistema dar baixa e entrada no estoque desta loja.";
+  }
+  function tplDefaults() {
+    var t = tpls.filter(function(x){ return x.id === tplId; })[0] || {};
+    [["pfRawP", t.rawProductId], ["pfFilP", t.filetProductId], ["pfIscP", t.iscaProductId]].forEach(function(a){
+      var s = document.getElementById(a[0]); if (s && a[1] && s.querySelector('option[value="' + a[1] + '"]')) s.value = a[1];
+    });
+    stockInfo();
+  }
+  if (!e) tplDefaults();
+  calc(); stockInfo();
+  ["pfRaw","pfQty","pfFil","pfIsc","pfDsc"].forEach(function(i){ document.getElementById(i).addEventListener("input", function(){ calc(); stockInfo(); }); });
+  ["pfRawP","pfFilP","pfIscP"].forEach(function(i){ document.getElementById(i).addEventListener("change", stockInfo); });
   document.getElementById("pfCancel").addEventListener("click", closeSheet);
   if (readOnly) return;
   sheet.querySelectorAll("[data-pft]").forEach(function(ch){ ch.addEventListener("click", function(){
     tplId = ch.getAttribute("data-pft"); sheet.querySelectorAll("[data-pft]").forEach(function(x){ x.classList.toggle("selected", x === ch); });
+    if (!e) tplDefaults();
   }); });
   document.getElementById("pfSave").addEventListener("click", function(){
     var t = tpls.filter(function(x){ return x.id === tplId; })[0];
     var data = { date: document.getElementById("pfDate").value || todayStr(), templateId: tplId, templateName: t ? t.name : tplId,
       rawKg: val("pfRaw"), filetQty: Math.round(val("pfQty")), filetKg: val("pfFil"), iscaKg: val("pfIsc"), discardKg: val("pfDsc"),
-      note: document.getElementById("pfNote").value.trim() };
+      note: document.getElementById("pfNote").value.trim(),
+      rawProductId: document.getElementById("pfRawP").value, filetProductId: document.getElementById("pfFilP").value, iscaProductId: document.getElementById("pfIscP").value,
+      rawProductName: products[document.getElementById("pfRawP").value] ? products[document.getElementById("pfRawP").value].name : "",
+      filetProductName: products[document.getElementById("pfFilP").value] ? products[document.getElementById("pfFilP").value].name : "",
+      stockMoved: document.getElementById("pfStock").checked };
+    if (data.stockMoved && (!data.rawProductId || !data.filetProductId)) { showToast("Para lançar no estoque, escolha o insumo e o produto produzido"); return; }
     if (!(data.rawKg > 0)) { showToast("Informe o peso do produto bruto"); return; }
     if (!(data.filetQty > 0) || !(data.filetKg > 0)) { showToast("Informe a quantidade e o peso dos filés"); return; }
     if (data.filetKg + data.iscaKg + data.discardKg > data.rawKg + 0.0005 && !window.confirm("Filés + iscas + descarte passam do peso bruto. Salvar mesmo assim?")) return;
     var btn = document.getElementById("pfSave"); btn.disabled = true; btn.textContent = "Salvando…";
+    var sidP = e ? (e.storeId || currentStoreId) : currentStoreId;
     var p = e ? db.doc("production/" + e.id).update(Object.assign(data, {editedAt: Date.now(), editedByName: currentEmployeeName}))
+        .then(function(){ return e.stockMoved ? applyProdStock(e, -1, sidP, e.id) : null; })
+        .then(function(){ return data.stockMoved ? applyProdStock(data, 1, sidP, e.id) : null; })
       : db.collection("production").add(Object.assign(data, { storeId: currentStoreId, storeName: stores[currentStoreId].name,
-          employeeId: currentEmployeeId, employeeName: currentEmployeeName, createdAt: Date.now() }));
-    p.then(function(){ closeSheet(); showToast("Produção salva"); prodData = null; renderProducao(); })
+          employeeId: currentEmployeeId, employeeName: currentEmployeeName, createdAt: Date.now() }))
+        .then(function(ref){ return data.stockMoved ? applyProdStock(data, 1, sidP, ref && ref.id) : null; });
+    p.then(function(){ closeSheet(); showToast(data.stockMoved ? "Produção salva e lançada no estoque" : "Produção salva"); prodData = null; renderProducao(); })
       .catch(function(err){ btn.disabled = false; btn.textContent = "Salvar produção"; showToast("Erro: " + errMsg(err)); });
   });
   var bd = document.getElementById("pfDel");
   if (bd) bd.addEventListener("click", function(){
-    if (!window.confirm("Excluir este lançamento de produção?")) return;
-    db.doc("production/" + e.id).delete().then(function(){ closeSheet(); showToast("Lançamento excluído"); prodData = null; renderProducao(); })
+    if (!window.confirm("Excluir este lançamento de produção?" + (e.stockMoved ? " O estoque será estornado (devolve o insumo e retira o produzido)." : ""))) return;
+    (e.stockMoved ? applyProdStock(e, -1, e.storeId || currentStoreId, e.id) : Promise.resolve()).then(function(){ return db.doc("production/" + e.id).delete(); }).then(function(){ closeSheet(); showToast("Lançamento excluído"); prodData = null; renderProducao(); })
       .catch(function(err){ showToast("Erro: " + errMsg(err)); });
   });
 }
@@ -1243,12 +1328,15 @@ function showNoKindItems(kind) {
 var rawRecvSession = [];
 var rawLinks = null, rawLinksLoading = false;
 function rawLinked(pid) { var p = products[pid]; return !!p && (p.prodType === "bruto" || (rawLinks && rawLinks.indexOf(pid) !== -1)); }
+var rawLinksWaiting = [];
 function loadRawLinks(cb) {
+  if (cb) rawLinksWaiting.push(cb);
   if (rawLinksLoading) return;
   rawLinksLoading = true;
+  function done() { rawLinksLoading = false; var w = rawLinksWaiting; rawLinksWaiting = []; w.forEach(function(f){ try { f(); } catch (e) {} }); }
   db.doc("meta/rawReceiveLinks").get().then(function(s){
-    rawLinks = s.exists && Array.isArray(s.data().ids) ? s.data().ids : []; rawLinksLoading = false; if (cb) cb();
-  }).catch(function(){ rawLinks = rawLinks || []; rawLinksLoading = false; if (cb) cb(); });
+    rawLinks = s.exists && Array.isArray(s.data().ids) ? s.data().ids : []; done();
+  }).catch(function(){ rawLinks = rawLinks || []; done(); });
 }
 function setRawLink(pid, on) {
   var ref = db.doc("meta/rawReceiveLinks");
@@ -1374,6 +1462,7 @@ function openEstoqueTopic(v) {
   if (v === "movs") { estoqueMovMode = true; movSearch = ""; renderStoreMovs(); window.scrollTo(0, 0); return; }
   if (v === "todas") { estoqueAllMode = true; allStock = null; storeSelect.style.display = "none"; renderAllStoresStock(); loadAllStock(); window.scrollTo(0, 0); return; }
   if (v === "pdf") { searchTerm = ""; estoqueCatFilter = ""; printEstoque(); return; }
+  if (v === "necessidade") { needEdit = false; needSearch = ""; loadNeeds(currentStoreId, null, true); }
   estoqueView = v; searchTerm = ""; renderEstoque(); window.scrollTo(0, 0);
 }
 function renderEstoqueHub() {
@@ -1399,6 +1488,11 @@ function renderEstoqueHub() {
     card("saldo", "📦", "Saldo do estoque", "Quanto há de cada produto. Entrada, saída e perda.", ids.length + " produtos · " + withStock + " com estoque" + (low ? ' · <span class="tc-warn">' + low + ' abaixo do mínimo</span>' : '')) +
     card("movs", "📒", "Lançamentos por data", "Entradas, saídas, perdas e ajustes por dia, semana ou mês.", "") +
     (ALL_STOCK_ROLES.indexOf(role) !== -1 ? card("todas", "🏬", "Estoque de todas as lojas", "Tabela com uma coluna por loja.", "") : '') +
+    card("necessidade", "📊", "Necessidade da loja", "Quanto a loja precisa por dia e a sugestão do que pedir.", (function(){
+      var it = needsCache[currentStoreId]; if (!it) { loadNeeds(currentStoreId, function(){ if (currentRoute === "estoque" && !estoqueView && !estoqueMovMode && !estoqueAllMode) renderEstoqueHub(); }); return "carregando…"; }
+      var ks = Object.keys(it).filter(function(pid){ return products[pid] && productInStore(pid, currentStoreId); }), low = ks.filter(function(pid){ return needSuggestion(pid, it[pid]) > 0; }).length;
+      return ks.length ? (low ? '<span class="tc-warn">' + low + ' abaixo da necessidade</span>' : ks.length + ' produtos · tudo em dia') : 'nenhuma necessidade definida';
+    })()) +
     card("pdf", "📄", "Resumo em PDF", "Saldo de todos os produtos desta loja para enviar.", "") + '</div>';
   html += '<div class="topic-group">Lançar</div><div class="topic-grid">' +
     (canCount ? card("contagem", "📋", "Contagem de estoque", "Contagem completa da loja, por gênero.", "Última completa: " + (lastFull ? fmtDateShort(lastFull.date) : "nenhuma")) : '') +
@@ -1488,6 +1582,148 @@ function renderKindTopic(kind) {
   bindTopicBack(); bindTopicRows();
   var st = document.getElementById("bTopicStart");
   if (st) st.addEventListener("click", function(){ if (kind === "produzido") openCountForm("produzido"); else openRawReceiveForm(); });
+}
+
+// ============================================================
+// NECESSIDADE DIÁRIA POR LOJA + SUGESTÃO DE PEDIDO
+// ============================================================
+var needsCache = {}, needsLoading = {};
+function canEditNeeds() { var r = currentRole(); return r === "Gerência" || r === "Diretoria"; }
+function loadNeeds(sid, cb, force) {
+  if (!sid) { if (cb) cb({}); return; }
+  if (needsCache[sid] && !force) { if (cb) cb(needsCache[sid]); return; }
+  db.doc("needs/" + sid).get().then(function(s){
+    needsCache[sid] = s.exists && s.data().items ? s.data().items : {};
+    if (cb) cb(needsCache[sid]);
+  }).catch(function(){ needsCache[sid] = needsCache[sid] || {}; if (cb) cb(needsCache[sid]); });
+}
+function saveNeeds(sid, changes) {
+  var ref = db.doc("needs/" + sid);
+  return ref.get().then(function(s){
+    var items = s.exists && s.data().items ? Object.assign({}, s.data().items) : {};
+    Object.keys(changes).forEach(function(pid){ var v = changes[pid]; if (v > 0) items[pid] = v; else delete items[pid]; });
+    var data = {storeId: sid, storeName: stores[sid] ? stores[sid].name : "", items: items, updatedAt: Date.now(), updatedBy: currentEmployeeName || ""};
+    return (s.exists ? ref.update(data) : ref.set(data)).then(function(){ needsCache[sid] = items; return items; });
+  });
+}
+// sugestão = necessidade − saldo atual (nunca negativa); unidade inteira arredonda para cima
+function needSuggestion(pid, need) {
+  var p = products[pid], st = scopedStock[pid] ? scopedStock[pid].quantity : 0;
+  var s = Math.max(0, (need || 0) - Math.max(0, st));
+  if (!s) return 0;
+  return (p && p.unit === "un") ? Math.ceil(s - 1e-9) : Math.round(s * 1000) / 1000;
+}
+
+// Necessidade de um produto em cada loja (aberta pelo cadastro do produto)
+function openProductNeeds(pid) {
+  var p = products[pid]; if (!p) return;
+  if (!canEditNeeds()) return;
+  var sids = storeOrder.filter(function(s){ return stores[s] && productInStore(pid, s); });
+  var vals = {}, pending = sids.length;
+  function draw() {
+    var h = '<h2>📊 Necessidade diária por loja</h2><div class="sub">' + esc(p.name) + ' — quanto cada operação precisa ter por dia. Cada loja é independente. Deixe em branco onde não usa.</div>';
+    sids.forEach(function(s){
+      h += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">' +
+        '<div style="flex:1;font-size:14px;font-weight:600;">' + (stores[s].isCentral ? '🏭 ' : '🏬 ') + esc(stores[s].name) + '</div>' +
+        '<input type="number" inputmode="decimal" min="0" step="any" data-need="' + s + '" value="' + (vals[s] ? vals[s] : '') + '" placeholder="—" style="width:90px;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:15px;text-align:right;">' +
+        '<span style="width:28px;font-size:12.5px;color:var(--text-2);">' + esc(p.unit || "un") + '</span></div>';
+    });
+    h += '<button class="btn btn-primary" id="ndSave" style="margin-top:12px;">Salvar necessidades</button><button class="btn btn-secondary" id="ndCancel">Cancelar</button>';
+    openSheet(h);
+    document.getElementById("ndCancel").addEventListener("click", closeSheet);
+    document.getElementById("ndSave").addEventListener("click", function(){
+      var btn = this; btn.disabled = true; btn.textContent = "Salvando…";
+      var jobs = [];
+      sheet.querySelectorAll("[data-need]").forEach(function(inp){
+        var s = inp.getAttribute("data-need"), v = parseFloat(String(inp.value).replace(",", ".")) || 0;
+        if ((vals[s] || 0) !== v) { var ch = {}; ch[pid] = v; jobs.push(saveNeeds(s, ch)); }
+      });
+      Promise.all(jobs).then(function(){ closeSheet(); showToast(jobs.length ? "Necessidades salvas" : "Nada alterado"); if (currentRoute === "estoque") renderEstoque(); })
+        .catch(function(err){ btn.disabled = false; btn.textContent = "Salvar necessidades"; showToast("Erro: " + errMsg(err)); });
+    });
+  }
+  if (!sids.length) { showToast("Produto não está em nenhuma loja"); return; }
+  sids.forEach(function(s){ loadNeeds(s, function(items){ vals[s] = items[pid] || 0; if (--pending === 0) draw(); }, true); });
+}
+
+// Tópico do Estoque: necessidade da loja e sugestão do que pedir
+var needEdit = false, needSearch = "";
+function renderNeedsTopic() {
+  var sid = currentStoreId;
+  if (!needsCache[sid]) { content.innerHTML = '<div class="loading-msg">Carregando necessidades…</div>'; loadNeeds(sid, function(){ if (currentRoute === "estoque" && estoqueView === "necessidade") renderNeedsTopic(); }); return; }
+  var items = needsCache[sid], sname = stores[sid] ? stores[sid].name : "", isCentral = stores[sid] && stores[sid].isCentral;
+  var html = topicHeader("📊 Necessidade da loja", "Quanto <b>" + esc(sname) + "</b> precisa ter por dia de cada produto. O sistema compara com o saldo atual e sugere quanto " + (isCentral ? "comprar ou produzir." : "pedir ao Estoque Central."),
+    canEditNeeds() ? '<button class="link-btn" id="ndToggle">' + (needEdit ? '✓ Concluir edição' : '✏️ Definir necessidades') + '</button>' : '');
+  if (needEdit) {
+    html += '<div class="searchbar"><input id="ndSearch" type="text" placeholder="Filtrar produto…" value="' + esc(needSearch) + '"></div>';
+    var t = normTxt(needSearch);
+    var pids = storeProductOrder(sid).filter(function(pid){ return !t || normTxt(products[pid].name).indexOf(t) !== -1; });
+    var groups = {}, order = [];
+    pids.forEach(function(pid){ var k = (products[pid].categoryId && categories[products[pid].categoryId]) ? products[pid].categoryId : "_none"; if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(pid); });
+    order.sort(function(a,b){ var na = a==="_none" ? "zzz" : categories[a].name, nb = b==="_none" ? "zzz" : categories[b].name; return na.localeCompare(nb, "pt-BR"); });
+    order.forEach(function(k){
+      html += '<div class="topic-sub">' + esc(k === "_none" ? "Sem gênero" : categories[k].name) + '</div>';
+      groups[k].forEach(function(pid){
+        var p = products[pid];
+        html += '<div class="topic-row static"><span>' + esc(p.name) + '<small>saldo: ' + fmtQty(scopedStock[pid] ? scopedStock[pid].quantity : 0) + ' ' + esc(p.unit || "un") + '</small></span>' +
+          '<span style="display:flex;align-items:center;gap:6px;"><input type="number" inputmode="decimal" min="0" step="any" data-ndp="' + pid + '" value="' + (items[pid] || '') + '" placeholder="—" style="width:78px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:15px;text-align:right;"><small>' + esc(p.unit || "un") + '</small></span></div>';
+      });
+    });
+    html += '<div style="position:sticky;bottom:0;background:var(--surface);padding:10px 0;"><button class="btn btn-primary" id="ndSaveAll">💾 Salvar necessidades</button></div>';
+  } else {
+    var rows = Object.keys(items).filter(function(pid){ return products[pid] && productInStore(pid, sid) && items[pid] > 0; })
+      .sort(function(a,b){ return needSuggestion(b, items[b]) - needSuggestion(a, items[a]) || (products[a].name||"").localeCompare(products[b].name||"", "pt-BR"); });
+    var sug = rows.filter(function(pid){ return needSuggestion(pid, items[pid]) > 0; });
+    if (!rows.length) {
+      html += '<div class="empty-state" style="padding:22px 8px;"><div class="emoji">📊</div>Nenhuma necessidade definida para ' + esc(sname) + '.<br>' +
+        (canEditNeeds() ? 'Toque em <b>✏️ Definir necessidades</b> e informe quanto a loja precisa por dia de cada produto.' : 'Peça para a Gerência ou a Diretoria definir.') + '</div>';
+    } else {
+      html += '<div class="need-kpis"><div><b>' + rows.length + '</b><span>produtos com necessidade</span></div><div><b class="' + (sug.length ? 'warn' : 'ok') + '">' + sug.length + '</b><span>precisam de reposição</span></div></div>';
+      if (sug.length && !isCentral) html += '<button class="btn btn-primary" id="ndOrder">🧾 Fazer pedido com a sugestão</button>';
+      html += '<table class="need-tbl"><thead><tr><th>Produto</th><th class="n">Precisa</th><th class="n">Tem</th><th class="n">Sugestão</th></tr></thead><tbody>' +
+        rows.map(function(pid){
+          var p = products[pid], st = scopedStock[pid] ? scopedStock[pid].quantity : 0, s = needSuggestion(pid, items[pid]);
+          return '<tr' + (s > 0 ? ' class="need-low"' : '') + '><td>' + esc(p.name) + '</td><td class="n">' + fmtQty(items[pid]) + '</td><td class="n">' + fmtQty(st) + '</td><td class="n"><b>' + (s > 0 ? fmtQty(s) + ' ' + esc(p.unit || "un") : '✓') + '</b></td></tr>';
+        }).join("") + '</tbody></table>';
+      html += '<div class="topic-empty">Sugestão = necessidade do dia − saldo atual da loja. Mantenha os lançamentos e a contagem em dia para a sugestão ficar certa.</div>';
+    }
+  }
+  content.innerHTML = html;
+  bindTopicBack();
+  var tg = document.getElementById("ndToggle"); if (tg) tg.addEventListener("click", function(){ needEdit = !needEdit; renderNeedsTopic(); });
+  var se = document.getElementById("ndSearch");
+  if (se) se.addEventListener("input", function(e){ needSearch = e.target.value; var pos = e.target.selectionStart; renderNeedsTopic(); var n = document.getElementById("ndSearch"); if (n) { n.focus(); n.setSelectionRange(pos, pos); } });
+  var sa = document.getElementById("ndSaveAll");
+  if (sa) sa.addEventListener("click", function(){
+    var ch = {}, n = 0;
+    content.querySelectorAll("[data-ndp]").forEach(function(inp){
+      var pid = inp.getAttribute("data-ndp"), v = parseFloat(String(inp.value).replace(",", ".")) || 0;
+      if ((items[pid] || 0) !== v) { ch[pid] = v; n++; }
+    });
+    if (!n) { needEdit = false; renderNeedsTopic(); return; }
+    sa.disabled = true; sa.textContent = "Salvando…";
+    saveNeeds(sid, ch).then(function(){ showToast(n + " necessidade(s) salva(s)"); needEdit = false; renderNeedsTopic(); })
+      .catch(function(err){ sa.disabled = false; sa.textContent = "💾 Salvar necessidades"; showToast("Erro: " + errMsg(err)); });
+  });
+  var od = document.getElementById("ndOrder"); if (od) od.addEventListener("click", function(){ openOrderForm({suggest: true}); });
+}
+// Pedido: carrega os itens com a sugestão
+function orderFillSuggestion() {
+  var items = needsCache[currentStoreId] || {}, n = 0, present = {};
+  orderDraftItems.forEach(function(it){ if (it.productId) present[it.productId] = it; });
+  Object.keys(items).forEach(function(pid){
+    if (!products[pid] || !productInStore(pid, currentStoreId)) return;
+    var s = needSuggestion(pid, items[pid]); if (!s) return;
+    var cid = products[pid].categoryId && categories[products[pid].categoryId] ? products[pid].categoryId : "";
+    if (present[pid]) present[pid].qty = String(s); else orderDraftItems.push({productId: pid, qty: String(s), catId: cid || undefined});
+    n++;
+  });
+  orderDraftItems.sort(function(a,b){
+    var ca = a.catId && categories[a.catId] ? categories[a.catId].name : "zzz", cb = b.catId && categories[b.catId] ? categories[b.catId].name : "zzz";
+    return ca.localeCompare(cb, "pt-BR");
+  });
+  renderOrderCatChips(); renderOrderItemRows();
+  showToast(n ? n + " item(ns) preenchido(s) com a sugestão — confira antes de enviar" : "Nenhum item abaixo da necessidade");
 }
 
 function renderPainel() {
@@ -1580,6 +1816,7 @@ function renderEstoque() {
   if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
   if (!estoqueView) { renderEstoqueHub(); return; }
   if (estoqueView === "contagem") { renderCountTopic(); return; }
+  if (estoqueView === "necessidade") { renderNeedsTopic(); return; }
   if (estoqueView === "produzido" || estoqueView === "bruto") { renderKindTopic(estoqueView); return; }
   var list = storeProductOrder(currentStoreId).map(function(id){ return products[id]; });
   if (searchTerm) {
@@ -2316,11 +2553,13 @@ function openProductForm(id) {
     '</details>' +
     '<div id="pAuth"></div>' +
     (readOnly ? '' : '<button class="btn btn-primary" id="bSave">Salvar</button>' + (p?'<button class="btn btn-secondary" id="bDel" style="color:var(--red);">Excluir produto</button>':'')) +
+    (p && canEditNeeds() ? '<button class="btn btn-secondary" id="bPNeeds" type="button" style="margin:2px 0 8px 0;">📊 Vincular necessidade por loja</button>' : '') +
     (p && currentRole() === "Diretoria" ? '<button class="link-btn" id="bPHist" style="display:block;margin:4px auto 8px;">🕘 Ver histórico deste produto</button>' : '') +
     '<button class="btn btn-secondary" id="bCancel">' + (readOnly?"Fechar":"Cancelar") + '</button>';
   openSheet(html);
   document.getElementById("bCancel").addEventListener("click", closeSheet);
   var bphi = document.getElementById("bPHist"); if (bphi) bphi.addEventListener("click", function(){ openProductHistory(id); });
+  var bpn = document.getElementById("bPNeeds"); if (bpn) bpn.addEventListener("click", function(){ openProductNeeds(id); });
   if (readOnly) return;
   var pStoreSel = (p && p.storeIds) ? p.storeIds.slice() : [];
   function pKindInfo() {
@@ -2900,8 +3139,9 @@ function nextOrderNumber(dateKey) {
 }
 
 var orderDraftItems = [];
-function openOrderForm() {
+function openOrderForm(opts) {
   if (!requireOperator()) return;
+  opts = opts || {};
   var isCentral = stores[currentStoreId] && stores[currentStoreId].isCentral;
   var showSup = canSeeSuppliers();
   var centralId = storeOrder.filter(function(id){ return stores[id].isCentral; })[0];
@@ -2925,6 +3165,7 @@ function openOrderForm() {
     '<div class="row2"><div class="field"><label>Data da entrega</label><input type="date" id="odDelDate" value="' + tomorrowStr() + '" min="' + todayStr() + '"></div>' +
     '<div class="field"><label>Horário da entrega</label><input type="time" id="odDelTime" value="09:00"></div></div>' +
     destHtml +
+    '<div id="odSuggest"></div>' +
     '<div class="chart-title" style="margin-top:4px;">Selecione o gênero para carregar os produtos</div>' +
     '<div class="chip-group" id="odCats" style="margin-bottom:12px;"></div>' +
     '<div id="odSummary" style="font-size:12.5px;color:var(--text-2);margin-bottom:8px;"></div>' +
@@ -2948,6 +3189,16 @@ function openOrderForm() {
     renderOrderCatChips(); renderOrderItemRows();
   });
   document.getElementById("bOrderConfirm").addEventListener("click", function(){ submitOrder(centralId); });
+  loadNeeds(currentStoreId, function(items){
+    var box = document.getElementById("odSuggest"); if (!box) return;
+    var ks = Object.keys(items).filter(function(pid){ return products[pid] && productInStore(pid, currentStoreId); });
+    var low = ks.filter(function(pid){ return needSuggestion(pid, items[pid]) > 0; }).length;
+    if (!ks.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="need-bar"><div><b>📊 Sugestão pela necessidade da loja</b><span>' + (low ? low + ' produto(s) abaixo da necessidade do dia' : 'Todos os produtos estão na necessidade do dia') + '</span></div>' +
+      (low ? '<button class="btn btn-primary btn-sm" id="bOdSuggest" type="button" style="width:auto;">✨ Preencher</button>' : '') + '</div>';
+    var b = document.getElementById("bOdSuggest"); if (b) b.addEventListener("click", orderFillSuggestion);
+    if (opts.suggest && low) orderFillSuggestion();
+  }, true);
 }
 function catProducts(catId) {
   return storeProductOrder(currentStoreId).filter(function(pid){ return (products[pid].categoryId || "") === catId; });
@@ -2994,7 +3245,8 @@ function renderOrderItemRows() {
       var filled = parseFloat(it.qty) > 0;
       html += '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);">' +
         '<div style="flex:1;min-width:0;"><div style="font-size:14px;' + (filled ? 'font-weight:700;' : '') + '">' + esc(p.name) + (weightLabel(p) ? ' <span style="font-weight:400;color:var(--text-2);font-size:12px;">' + weightLabel(p) + '</span>' : '') + '</div>' +
-        '<div style="font-size:11.5px;color:' + (typeof p.minStock==="number" && p.minStock>0 && inStock<=p.minStock ? 'var(--amber)' : 'var(--text-2)') + ';">Em estoque: ' + fmtQty(inStock) + ' ' + esc(p.unit||"un") + '</div></div>' +
+        '<div style="font-size:11.5px;color:' + (typeof p.minStock==="number" && p.minStock>0 && inStock<=p.minStock ? 'var(--amber)' : 'var(--text-2)') + ';">Em estoque: ' + fmtQty(inStock) + ' ' + esc(p.unit||"un") +
+          ((needsCache[currentStoreId] || {})[it.productId] ? ' · precisa ' + fmtQty(needsCache[currentStoreId][it.productId]) + (needSuggestion(it.productId, needsCache[currentStoreId][it.productId]) ? ' · <b style="color:var(--accent);">sugestão ' + fmtQty(needSuggestion(it.productId, needsCache[currentStoreId][it.productId])) + '</b>' : ' · ✓') : '') + '</div></div>' +
         '<input type="number" inputmode="decimal" min="0" step="any" data-idx="' + idx + '" data-f="qty" value="' + esc(it.qty) + '" placeholder="Qtd" style="width:74px;padding:8px;border-radius:8px;border:1px solid ' + (filled ? 'var(--accent)' : 'var(--border)') + ';background:var(--surface-2);color:var(--text);font-size:15px;text-align:right;">' +
         '<button data-rm="' + idx + '" style="background:none;border:none;color:var(--red);font-size:18px;cursor:pointer;padding:0 2px;">✕</button>' +
       '</div>';
@@ -5965,7 +6217,7 @@ init();
 <div id="updBar" style="display:none;position:fixed;left:12px;right:12px;bottom:14px;z-index:9999;background:#1f6f43;color:#fff;border-radius:14px;padding:13px 16px;font:600 14.5px/1.3 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;text-align:center;">🔄 Saiu uma versão nova do sistema. <u>Toque aqui para atualizar</u></div>
 <script>
 (function(){
-  var APP_BUILD = "20261017162731";
+  var APP_BUILD = "20261017173113";
   var bar = document.getElementById("updBar"), checking = false;
   bar.addEventListener("click", function(){ location.reload(); });
   function check() {
