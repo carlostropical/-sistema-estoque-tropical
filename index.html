@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261017173113">
+<meta name="app-build" content="20261017175234">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -319,7 +319,8 @@
 .rr-opt.on { background:var(--accent-2); }
 .rr-sel { padding:10px 12px; border-radius:10px; background:var(--accent-2); margin:-6px 0 12px 0; font-size:14px; }
 .topic-intro { font-size:15px; margin:2px 0 6px 0; } .topic-intro span { display:block; font-size:12.5px; color:var(--text-2); margin-top:2px; }
-.topic-group { font-size:11.5px; font-weight:800; letter-spacing:.6px; text-transform:uppercase; color:var(--text-2); margin:16px 0 8px 2px; }
+.topic-group { display:inline-block; font-size:13px; font-weight:800; letter-spacing:.8px; text-transform:uppercase; margin:18px 0 8px 0; padding:5px 12px; border-radius:20px; color:#fff; background:#2f6fe4; }
+.topic-group.tg-lancar { background:#1e9e55; }
 .topic-grid { display:grid; grid-template-columns:1fr; gap:8px; }
 @media (min-width: 700px) { .topic-grid { grid-template-columns:1fr 1fr; } }
 .topic-card { display:flex; align-items:center; gap:12px; width:100%; text-align:left; padding:14px; border-radius:14px; border:1px solid var(--border); background:var(--surface); color:var(--text); font:inherit; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.04); }
@@ -358,6 +359,22 @@
 .need-tbl th { text-align:left; font-size:11.5px; color:var(--text-2); padding:8px 8px; border-bottom:1px solid var(--border); }
 .need-tbl td { padding:9px 8px; border-bottom:1px solid var(--border); } .need-tbl .n { text-align:right; white-space:nowrap; }
 .need-tbl tr.need-low td { background:var(--amber-bg); }
+.fg-howto { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; font-size:12.5px; color:var(--text-2); }
+.fg-howto > div { border:1px solid var(--border); border-radius:10px; padding:8px 10px; background:var(--surface); }
+.fg-howto b { display:block; color:var(--text); font-size:13.5px; margin-bottom:2px; }
+.fg-howto > span { grid-column:1 / -1; font-size:12px; }
+.fg-item { border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:10px 12px; margin-bottom:8px; }
+.fg-name { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:8px; } .fg-name b { font-size:14.5px; } .fg-name small { font-size:11.5px; color:var(--text-2); white-space:nowrap; }
+.fg-shifts { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.fg-shift { background:var(--surface-2); border-radius:10px; padding:7px 8px; }
+.fg-sh { font-size:11.5px; font-weight:800; color:var(--text-2); margin-bottom:5px; } .fg-sh small { font-weight:500; }
+.fg-pair { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.fg-pair label { font-size:10.5px; font-weight:700; color:var(--text-2); text-transform:uppercase; letter-spacing:.3px; }
+.fg-pair input { display:block; width:100%; margin-top:2px; padding:8px 4px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:16px; text-align:center; }
+.fg-out { display:flex; justify-content:space-between; gap:8px; margin-top:8px; font-size:12.5px; color:var(--text-2); flex-wrap:wrap; }
+.fg-out b { color:var(--text); font-size:15px; margin-left:3px; } .fg-out i { font-style:normal; font-size:11.5px; margin-left:3px; }
+.fg-pick { display:flex; gap:10px; align-items:flex-start; padding:8px 2px; border-bottom:1px solid var(--border); font-size:14px; cursor:pointer; }
+.fg-pick input { width:19px; height:19px; margin-top:1px; flex:none; } .fg-pick small { display:block; font-size:11.5px; color:var(--text-2); }
 </style>
 </head>
 <body class="locked">
@@ -1484,7 +1501,7 @@ function renderEstoqueHub() {
       (stat ? '<em>' + stat + '</em>' : '') + '</span><span class="tc-go">›</span></button>';
   }
   var html = '<div class="topic-intro">📦 Estoque · <b>' + esc(sname) + '</b><span>Escolha o que você quer fazer.</span></div>';
-  html += '<div class="topic-group">Consultar</div><div class="topic-grid">' +
+  html += '<div class="topic-group tg-consultar">🔎 Consultar</div><div class="topic-grid">' +
     card("saldo", "📦", "Saldo do estoque", "Quanto há de cada produto. Entrada, saída e perda.", ids.length + " produtos · " + withStock + " com estoque" + (low ? ' · <span class="tc-warn">' + low + ' abaixo do mínimo</span>' : '')) +
     card("movs", "📒", "Lançamentos por data", "Entradas, saídas, perdas e ajustes por dia, semana ou mês.", "") +
     (ALL_STOCK_ROLES.indexOf(role) !== -1 ? card("todas", "🏬", "Estoque de todas as lojas", "Tabela com uma coluna por loja.", "") : '') +
@@ -1494,7 +1511,7 @@ function renderEstoqueHub() {
       return ks.length ? (low ? '<span class="tc-warn">' + low + ' abaixo da necessidade</span>' : ks.length + ' produtos · tudo em dia') : 'nenhuma necessidade definida';
     })()) +
     card("pdf", "📄", "Resumo em PDF", "Saldo de todos os produtos desta loja para enviar.", "") + '</div>';
-  html += '<div class="topic-group">Lançar</div><div class="topic-grid">' +
+  html += '<div class="topic-group tg-lancar">✍️ Lançar</div><div class="topic-grid">' +
     (canCount ? card("contagem", "📋", "Contagem de estoque", "Contagem completa da loja, por gênero.", "Última completa: " + (lastFull ? fmtDateShort(lastFull.date) : "nenhuma")) : '') +
     (canCount ? card("produzido", "🔪", "Contagem de estoque produzido", "Itens já porcionados e prontos na base.", nProd + " itens · última: " + (lastProd ? fmtDateShort(lastProd.date) : "nenhuma"), "tc-prod") : '') +
     card("bruto", "📥", "Recebimento de mercadoria não produzida", "Mercadoria que chega bruta, por kg: coxão mole, frango…", nRaw + " itens vinculados", "tc-raw") + '</div>';
@@ -5224,7 +5241,7 @@ var DEFAULT_FRIDGE_ITEMS = [
 var fridgeDate = "";
 var fridgeConfig = null;     // {items:[{id,name}]}
 var fridgeDay = null;        // documento do dia (ou null se ainda não existe)
-var fridgeDayLoaded = false;
+var fridgeDayLoaded = false, fridgeConfigLoaded = false, fridgeNext = null;
 var fridgePrev = null;       // documento do dia anterior
 var fridgeDraft = {};        // itemId -> campos digitados ainda não salvos
 var fridgeSaveTimers = {};
@@ -5238,10 +5255,39 @@ function canFridge() {
   return !!(currentEmployeeId && employees[currentEmployeeId]);
 }
 function canManageFridge() { var r = currentRole(); return r === "Gerência" || r === "Diretoria"; }
-function fridgeItems() {
-  if (fridgeConfig && fridgeConfig.items && fridgeConfig.items.length) return fridgeConfig.items;
-  return DEFAULT_FRIDGE_ITEMS.map(function(n, i){ return {id: "f" + (i+1), name: n}; });
+var FRIDGE_SHIFTS = { lunch: "10:00", dinner: "15:30" };
+function fridgeIsDrinkCat(cid) { return !!(cid && categories[cid] && /bebida/i.test(categories[cid].name || "")); }
+function fridgeAllProductIds() {
+  if (fridgeConfig && Array.isArray(fridgeConfig.productIds)) return fridgeConfig.productIds.filter(function(pid){ return products[pid]; });
+  return productOrder.filter(function(pid){ return fridgeIsDrinkCat(products[pid].categoryId) && !products[pid].centralOnly; });
 }
+function fridgeItems() {
+  var haveProducts = productOrder && productOrder.length;
+  if (haveProducts) {
+    var ids = fridgeAllProductIds().filter(function(pid){ return productInStore(pid, currentStoreId) && !products[pid].centralOnly; });
+    ids.sort(function(a,b){
+      var ca = categories[products[a].categoryId] ? categories[products[a].categoryId].name : "zzz", cb = categories[products[b].categoryId] ? categories[products[b].categoryId].name : "zzz";
+      return ca.localeCompare(cb, "pt-BR") || (products[a].name||"").localeCompare(products[b].name||"", "pt-BR");
+    });
+    fridgeSyncSnapshot();
+    return ids.map(function(pid){ return {id: pid, name: products[pid].name}; });
+  }
+  // perfil "Contagem de Geladeira" não lê o cadastro de produtos: usa a cópia salva na configuração
+  var snap = (fridgeConfig && Array.isArray(fridgeConfig.snapshot)) ? fridgeConfig.snapshot : [];
+  return snap.filter(function(x){ return !x.storeIds || !x.storeIds.length || x.storeIds.indexOf(currentStoreId) !== -1; })
+    .map(function(x){ return {id: x.id, name: x.name}; });
+}
+var fridgeSnapSent = "";
+function fridgeSyncSnapshot() {
+  if (isFridgeOnly() || !productOrder.length || !fridgeConfigLoaded) return;
+  var snap = fridgeAllProductIds().map(function(pid){ var p = products[pid]; return {id: pid, name: p.name, storeIds: p.storeIds || []}; });
+  var key = JSON.stringify(snap);
+  if (key === fridgeSnapSent || (fridgeConfig && JSON.stringify(fridgeConfig.snapshot || null) === key)) return;
+  fridgeSnapSent = key;
+  var ref = db.doc("meta/fridgeConfig");
+  ref.get().then(function(s){ return s.exists ? ref.update({snapshot: snap}) : ref.set({snapshot: snap}); }).catch(function(){ fridgeSnapSent = ""; });
+}
+
 function fridgeDocId(storeId, date) { return storeId + "_" + date.replace(/-/g, ""); }
 function prevDateStr(d) { var x = dateFromStr(d); x.setDate(x.getDate()-1); return ymd(x); }
 function numOrNull(v) { if (v === "" || v === null || v === undefined) return null; var n = parseFloat(String(v).replace(",", ".")); return isNaN(n) ? null : n; }
@@ -5249,19 +5295,32 @@ function fridgeRow(id) {
   var saved = (fridgeDay && fridgeDay["r_" + id]) || {};
   var d = fridgeDraft[id] || {};
   var out = {};
-  ["lunchTime","lunchQty","dinnerTime","dinnerQty","finalCount"].forEach(function(k){
+  ["lunchCount","lunchQty","dinnerCount","dinnerQty"].forEach(function(k){
     out[k] = d.hasOwnProperty(k) ? d[k] : (saved[k] === null || saved[k] === undefined ? "" : saved[k]);
   });
-  out.by = saved.by || ""; out.at = saved.at || 0;
+  out.by = saved.by || ""; out.at = saved.at || 0; out.lunchAt = saved.lunchAt || 0; out.dinnerAt = saved.dinnerAt || 0;
   return out;
 }
+// cálculo das saídas de um item (r = linha do dia, nextRow = linha do dia seguinte, prevRow = dia anterior)
+function fridgeCalc(r, prevRow, nextRow) {
+  var lc = numOrNull(r.lunchCount), lq = numOrNull(r.lunchQty) || 0, dc = numOrNull(r.dinnerCount), dq = numOrNull(r.dinnerQty) || 0;
+  var nlc = nextRow ? numOrNull(nextRow.lunchCount) : null;
+  var pdc = prevRow ? numOrNull(prevRow.dinnerCount) : null, pdq = prevRow ? (numOrNull(prevRow.dinnerQty) || 0) : 0;
+  return {
+    ab: lq + dq,
+    lunch: (lc !== null && dc !== null) ? lc + lq - dc : null,
+    dinner: (dc !== null && nlc !== null) ? dc + dq - nlc : null,
+    prevDinner: (pdc !== null && lc !== null) ? pdc + pdq - lc : null
+  };
+}
+
 function fridgeEditable() { return canManageFridge() || fridgeDate === todayStr(); }
 
 function subscribeFridge(storeId) {
   if (!fridgeDate) fridgeDate = todayStr();
   fridgeDay = null; fridgeDayLoaded = false; fridgePrev = null; fridgeDraft = {}; fridgeDocExists = false; fridgeStatusText = "";
   scopedUnsubs.push(db.doc("meta/fridgeConfig").onSnapshot(function(snap){
-    fridgeConfig = snap.exists ? snap.data() : null;
+    fridgeConfig = snap.exists ? snap.data() : null; fridgeConfigLoaded = true;
     if (currentRoute === "geladeira") renderGeladeira();
   }, function(){}));
   scopedUnsubs.push(db.doc("fridge/" + fridgeDocId(storeId, fridgeDate)).onSnapshot(function(snap){
@@ -5273,6 +5332,12 @@ function subscribeFridge(storeId) {
     fridgePrev = snap.exists ? snap.data() : null;
     if (currentRoute === "geladeira") renderGeladeira();
   }).catch(function(){});
+  fridgeNext = null;
+  var nx = dateFromStr(fridgeDate); nx.setDate(nx.getDate() + 1);
+  db.doc("fridge/" + fridgeDocId(storeId, ymd(nx))).get().then(function(snap){
+    fridgeNext = snap.exists ? snap.data() : null;
+    if (currentRoute === "geladeira") renderGeladeira();
+  }).catch(function(){});
 }
 
 function renderGeladeira() {
@@ -5280,9 +5345,7 @@ function renderGeladeira() {
   if (ae && ae.classList && ae.classList.contains("fgInp") && currentRoute === "geladeira") { fridgePendingRender = true; return; }
   fridgePendingRender = false;
   if (!canFridge()) {
-    content.innerHTML = '<div class="empty-state"><div class="emoji">🧊</div>' + (currentEmployeeId
-        ? 'Seu usuário não tem acesso à Contagem de geladeira.<br>Peça para a Diretoria liberar no seu cadastro (Funcionários → 🧊 Acesso à Contagem de geladeira).'
-        : 'Escolha quem está usando o sistema para abrir a Contagem de geladeira.') + '</div>' +
+    content.innerHTML = '<div class="empty-state"><div class="emoji">🧊</div>' + (currentEmployeeId ? 'Seu usuário não tem acesso à Contagem de geladeira.' : 'Escolha quem está usando o sistema para abrir a Contagem de geladeira.') + '</div>' +
       '<button class="btn btn-primary" id="fgWho">' + (currentEmployeeId ? 'Trocar usuário' : 'Escolher usuário') + '</button>';
     document.getElementById("fgWho").addEventListener("click", openOperatorPicker);
     return;
@@ -5290,64 +5353,64 @@ function renderGeladeira() {
   if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
   if (!fridgeDate) fridgeDate = todayStr();
   if (!fridgeDayLoaded) { content.innerHTML = '<div class="loading-msg">Carregando contagem…</div>'; return; }
-
   var editable = fridgeEditable();
   var items = fridgeItems();
+  var sname = stores[currentStoreId] ? stores[currentStoreId].name : "";
   var html = '<div class="section-head"><h2>🧊 Contagem de geladeira</h2><div style="display:flex;gap:14px;">' +
     '<button class="link-btn" id="fgReport">📄 Relatório</button>' +
     (canManageFridge() ? '<button class="link-btn" id="fgEditList">✏️ Editar lista</button>' : '') + '</div></div>';
   html += '<div class="row2"><div class="field" style="margin-bottom:8px;"><label>Data</label><input type="date" id="fgDate" value="' + fridgeDate + '"' +
     (canManageFridge() ? '' : ' max="' + todayStr() + '"') + '></div>' +
-    '<div class="field" style="margin-bottom:8px;"><label>Loja</label><input type="text" value="' + esc(stores[currentStoreId] ? stores[currentStoreId].name : "") + '" disabled></div></div>';
-  html += '<div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px;">Registre a quantidade abastecida na geladeira no <b>almoço</b> e no <b>jantar</b>. Ao final do jantar, faça a <b>contagem final</b> (sobra). O sistema salva sozinho.' +
-    (editable ? '' : ' <span style="color:var(--amber);font-weight:700;">Dia anterior: somente leitura.</span>') + '</div>';
+    '<div class="field" style="margin-bottom:8px;"><label>Loja</label><input type="text" value="' + esc(sname) + '" disabled></div></div>';
+  html += '<div class="fg-howto"><div><b>☀️ Turno almoço · ' + FRIDGE_SHIFTS.lunch + '</b>Conte quantas tem na geladeira e informe quanto você colocou.</div>' +
+    '<div><b>🌙 Turno jantar · ' + FRIDGE_SHIFTS.dinner + '</b>Conte de novo e informe quanto colocou.</div>' +
+    '<span>O sistema salva sozinho e calcula quanto saiu em cada turno.' + (editable ? '' : ' <b style="color:var(--amber);">Dia anterior: somente leitura.</b>') + '</span></div>';
   html += '<div id="fgStatus" style="font-size:12px;color:var(--text-2);min-height:16px;margin-bottom:6px;">' + esc(fridgeStatusText) + '</div>';
-
-  var tot = {ab:0, fin:0, said:0, saidKnown:0, finCount:0};
+  if (!items.length) {
+    html += '<div class="empty-state"><div class="emoji">🥤</div>Nenhuma bebida vinculada a ' + esc(sname) + '.<br>' +
+      (canManageFridge() ? 'Toque em <b>✏️ Editar lista</b> para escolher as bebidas da geladeira, ou vincule as bebidas à loja em Produtos.' : 'Peça para a Gerência escolher as bebidas da geladeira desta loja.') + '</div>';
+  }
+  var tot = {ab: 0, lunch: 0, lunchN: 0, dinner: 0, dinnerN: 0, prev: 0, prevN: 0};
+  var dis = editable ? "" : " disabled";
+  function inp(id, field, val, ph) {
+    return '<input class="fgInp" data-fid="' + id + '" data-ff="' + field + '" type="number" inputmode="numeric" min="0" step="any" value="' + esc(val) + '" placeholder="' + ph + '"' + dis + '>';
+  }
+  function hm(ts) { return ts ? new Date(ts).toLocaleTimeString("pt-BR", {hour: "2-digit", minute: "2-digit"}) : ""; }
   items.forEach(function(it){
     var r = fridgeRow(it.id);
-    var lq = numOrNull(r.lunchQty) || 0, dq = numOrNull(r.dinnerQty) || 0, ab = lq + dq;
-    var fin = numOrNull(r.finalCount);
-    var prevRow = fridgePrev && fridgePrev["r_" + it.id];
-    var prevFin = prevRow ? numOrNull(prevRow.finalCount) : null;
-    var saida = (fin !== null && prevFin !== null) ? prevFin + ab - fin : null;
-    tot.ab += ab; if (fin !== null) { tot.fin += fin; tot.finCount++; }
-    if (saida !== null) { tot.said += saida; tot.saidKnown++; }
-    var dis = editable ? "" : " disabled";
-    function inp(field, type, val, ph, w) {
-      return '<input class="fgInp" data-fid="' + it.id + '" data-ff="' + field + '" type="' + type + '"' + (type === "number" ? ' inputmode="numeric" min="0" step="any"' : '') +
-        ' value="' + esc(val) + '" placeholder="' + ph + '"' + dis + ' style="width:' + w + ';padding:8px 6px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:15px;text-align:center;">';
-    }
-    html += '<div class="item-row" style="padding:10px 12px;">' +
-      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px;">' +
-        '<div style="font-weight:700;font-size:14.5px;">' + esc(it.name) + '</div>' +
-        '<div style="font-size:11.5px;color:var(--text-2);white-space:nowrap;">' + (r.by ? '👤 ' + esc(r.by.split(" ")[0]) : '') + '</div></div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
-        '<div><div style="font-size:11px;font-weight:700;color:var(--text-2);margin-bottom:4px;">☀️ ALMOÇO</div><div style="display:flex;gap:6px;">' +
-          inp("lunchTime", "time", r.lunchTime, "Hora", "58%") + inp("lunchQty", "number", r.lunchQty, "Qtd", "42%") + '</div></div>' +
-        '<div><div style="font-size:11px;font-weight:700;color:var(--text-2);margin-bottom:4px;">🌙 JANTAR</div><div style="display:flex;gap:6px;">' +
-          inp("dinnerTime", "time", r.dinnerTime, "Hora", "58%") + inp("dinnerQty", "number", r.dinnerQty, "Qtd", "42%") + '</div></div>' +
+    var k = fridgeCalc(r, fridgePrev && fridgePrev["r_" + it.id], fridgeNext && fridgeNext["r_" + it.id]);
+    tot.ab += k.ab;
+    if (k.lunch !== null) { tot.lunch += k.lunch; tot.lunchN++; }
+    if (k.dinner !== null) { tot.dinner += k.dinner; tot.dinnerN++; }
+    if (k.prevDinner !== null) { tot.prev += k.prevDinner; tot.prevN++; }
+    html += '<div class="fg-item">' +
+      '<div class="fg-name"><b>' + esc(it.name) + '</b><small>' + (r.by ? '👤 ' + esc(r.by.split(" ")[0]) : '') + '</small></div>' +
+      '<div class="fg-shifts">' +
+        '<div class="fg-shift"><div class="fg-sh">☀️ Almoço · ' + FRIDGE_SHIFTS.lunch + (r.lunchAt ? ' <small>(' + hm(r.lunchAt) + ')</small>' : '') + '</div>' +
+          '<div class="fg-pair"><label>Contagem' + inp(it.id, "lunchCount", r.lunchCount, "tem") + '</label><label>Abastecido' + inp(it.id, "lunchQty", r.lunchQty, "pôs") + '</label></div></div>' +
+        '<div class="fg-shift"><div class="fg-sh">🌙 Jantar · ' + FRIDGE_SHIFTS.dinner + (r.dinnerAt ? ' <small>(' + hm(r.dinnerAt) + ')</small>' : '') + '</div>' +
+          '<div class="fg-pair"><label>Contagem' + inp(it.id, "dinnerCount", r.dinnerCount, "tem") + '</label><label>Abastecido' + inp(it.id, "dinnerQty", r.dinnerQty, "pôs") + '</label></div></div>' +
       '</div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;align-items:end;">' +
-        '<div><div style="font-size:11px;font-weight:700;color:var(--text-2);">Total abastecido</div><div class="fgTot" data-fid="' + it.id + '" style="font-size:17px;font-weight:800;padding:6px 0;">' + fmtQty(ab) + '</div></div>' +
-        '<div><div style="font-size:11px;font-weight:700;color:var(--text-2);margin-bottom:4px;">Contagem final</div>' + inp("finalCount", "number", r.finalCount, "Sobra", "100%") + '</div>' +
-        '<div><div style="font-size:11px;font-weight:700;color:var(--text-2);">Saída do dia</div><div class="fgSaida" data-fid="' + it.id + '" style="font-size:17px;font-weight:800;padding:6px 0;color:' + (saida !== null && saida < 0 ? 'var(--red)' : 'var(--text)') + ';">' +
-          (saida !== null ? fmtQty(saida) : '<span style="font-size:12px;font-weight:500;color:var(--text-2);">' + (fin === null ? '—' : 'sem sobra de ontem') + '</span>') + '</div></div>' +
-      '</div></div>';
+      '<div class="fg-out" data-fout="' + it.id + '">' + fridgeOutHtml(k) + '</div></div>';
   });
-
-  html += '<div class="item-row" style="background:var(--amber-bg);border-color:var(--amber);">' +
-    '<div style="font-weight:800;margin-bottom:6px;">Totais do dia</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:13px;">' +
-      '<div>Abastecido<br><b style="font-size:17px;">' + fmtQty(tot.ab) + '</b></div>' +
-      '<div>Contagem final<br><b style="font-size:17px;">' + (tot.finCount ? fmtQty(tot.fin) : "—") + '</b>' + (tot.finCount && tot.finCount < items.length ? '<br><span style="font-size:11px;">' + tot.finCount + '/' + items.length + ' contados</span>' : '') + '</div>' +
-      '<div>Saída<br><b style="font-size:17px;">' + (tot.saidKnown ? fmtQty(tot.said) : "—") + '</b></div>' +
-    '</div></div>';
-  html += '<div style="font-size:11.5px;color:var(--text-2);margin:-2px 0 12px 0;">Saída do dia = sobra do dia anterior + total abastecido − contagem final.</div>';
+  if (items.length) {
+    html += '<div class="item-row" style="background:var(--amber-bg);border-color:var(--amber);">' +
+      '<div style="font-weight:800;margin-bottom:6px;">Totais do dia</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:13px;">' +
+        '<div>Abastecido<br><b style="font-size:17px;">' + fmtQty(tot.ab) + '</b></div>' +
+        '<div>Saída almoço<br><b style="font-size:17px;">' + (tot.lunchN ? fmtQty(tot.lunch) : "—") + '</b></div>' +
+        '<div>Saída jantar<br><b style="font-size:17px;">' + (tot.dinnerN ? fmtQty(tot.dinner) : "—") + '</b>' + (!tot.dinnerN ? '<br><span style="font-size:11px;">fecha amanhã às ' + FRIDGE_SHIFTS.lunch + '</span>' : '') + '</div>' +
+      '</div>' + (tot.prevN ? '<div style="font-size:12.5px;margin-top:6px;">Jantar de ontem (fechado hoje às ' + FRIDGE_SHIFTS.lunch + '): <b>' + fmtQty(tot.prev) + '</b></div>' : '') + '</div>';
+    html += '<div style="font-size:11.5px;color:var(--text-2);margin:-2px 0 12px 0;">Saída do almoço = contagem ' + FRIDGE_SHIFTS.lunch + ' + abastecido ' + FRIDGE_SHIFTS.lunch + ' − contagem ' + FRIDGE_SHIFTS.dinner + '.<br>Saída do jantar = contagem ' + FRIDGE_SHIFTS.dinner + ' + abastecido ' + FRIDGE_SHIFTS.dinner + ' − contagem ' + FRIDGE_SHIFTS.lunch + ' do dia seguinte.</div>';
+  }
   html += '<div class="field"><label>Observações</label><textarea class="fgInp" id="fgNotes" data-ff="notes" rows="2"' + (editable ? '' : ' disabled') + '>' + esc(fridgeDay && fridgeDay.notes || "") + '</textarea></div>';
   if (fridgeDay && fridgeDay.updatedAt) html += '<div style="font-size:11.5px;color:var(--text-2);">Última alteração: ' + fmtDate(fridgeDay.updatedAt) + (fridgeDay.updatedByName ? ' por ' + esc(fridgeDay.updatedByName) : '') + '</div>';
   content.innerHTML = html;
   bindGeladeira();
+}
+function fridgeOutHtml(k) {
+  function v(x, empty) { return x === null ? '<i>' + empty + '</i>' : '<b' + (x < 0 ? ' style="color:var(--red);"' : '') + '>' + fmtQty(x) + '</b>'; }
+  return '<span>Saída almoço ' + v(k.lunch, "falta contagem " + FRIDGE_SHIFTS.dinner) + '</span><span>Saída jantar ' + v(k.dinner, "fecha amanhã " + FRIDGE_SHIFTS.lunch) + '</span>';
 }
 
 function bindGeladeira() {
@@ -5366,12 +5429,6 @@ function bindGeladeira() {
       var id = inp.getAttribute("data-fid"), f = inp.getAttribute("data-ff");
       if (!fridgeDraft[id]) fridgeDraft[id] = {};
       fridgeDraft[id][f] = inp.value;
-      // ao digitar a quantidade de um turno, preenche a hora automaticamente se estiver vazia
-      if ((f === "lunchQty" || f === "dinnerQty") && inp.value !== "") {
-        var tf = f === "lunchQty" ? "lunchTime" : "dinnerTime";
-        var tEl = content.querySelector('.fgInp[data-fid="' + id + '"][data-ff="' + tf + '"]');
-        if (tEl && !tEl.value) { tEl.value = nowTimeStr(); fridgeDraft[id][tf] = tEl.value; }
-      }
       updateFridgeRowCalc(id);
       scheduleFridgeSave(id);
     });
@@ -5383,17 +5440,10 @@ function bindGeladeira() {
 }
 function updateFridgeRowCalc(id) {
   var r = fridgeRow(id);
-  var ab = (numOrNull(r.lunchQty) || 0) + (numOrNull(r.dinnerQty) || 0);
-  var fin = numOrNull(r.finalCount);
-  var prevRow = fridgePrev && fridgePrev["r_" + id];
-  var prevFin = prevRow ? numOrNull(prevRow.finalCount) : null;
-  var t = content.querySelector('.fgTot[data-fid="' + id + '"]'); if (t) t.textContent = fmtQty(ab);
-  var s = content.querySelector('.fgSaida[data-fid="' + id + '"]');
-  if (s) {
-    if (fin !== null && prevFin !== null) { var v = prevFin + ab - fin; s.textContent = fmtQty(v); s.style.color = v < 0 ? "var(--red)" : "var(--text)"; }
-    else s.innerHTML = '<span style="font-size:12px;font-weight:500;color:var(--text-2);">' + (fin === null ? '—' : 'sem sobra de ontem') + '</span>';
-  }
+  var k = fridgeCalc(r, fridgePrev && fridgePrev["r_" + id], fridgeNext && fridgeNext["r_" + id]);
+  var el = content.querySelector('[data-fout="' + id + '"]'); if (el) el.innerHTML = fridgeOutHtml(k);
 }
+
 function setFridgeStatus(txt) { fridgeStatusText = txt; var s = document.getElementById("fgStatus"); if (s) s.textContent = txt; }
 function scheduleFridgeSave(id) {
   clearTimeout(fridgeSaveTimers[id]);
@@ -5403,20 +5453,24 @@ function scheduleFridgeSave(id) {
 function flushFridgeSave(id) {
   if (!id || !fridgeDraft[id]) return;
   clearTimeout(fridgeSaveTimers[id]);
-  var r = fridgeRow(id);
+  var r = fridgeRow(id), old = (fridgeDay && fridgeDay["r_" + id]) || {}, now = Date.now();
+  var d = fridgeDraft[id];
   var row = {
-    lunchTime: r.lunchTime || "", lunchQty: numOrNull(r.lunchQty),
-    dinnerTime: r.dinnerTime || "", dinnerQty: numOrNull(r.dinnerQty),
-    finalCount: numOrNull(r.finalCount), by: currentEmployeeName || "", at: Date.now()
+    lunchCount: numOrNull(r.lunchCount), lunchQty: numOrNull(r.lunchQty),
+    dinnerCount: numOrNull(r.dinnerCount), dinnerQty: numOrNull(r.dinnerQty),
+    lunchAt: (d.hasOwnProperty("lunchCount") || d.hasOwnProperty("lunchQty")) ? now : (old.lunchAt || 0),
+    dinnerAt: (d.hasOwnProperty("dinnerCount") || d.hasOwnProperty("dinnerQty")) ? now : (old.dinnerAt || 0),
+    by: currentEmployeeName || "", at: now
   };
   var it = fridgeItems().filter(function(x){ return x.id === id; })[0];
-  row.name = it ? it.name : "";
+  row.name = it ? it.name : (old.name || "");
   var patch = {}; patch["r_" + id] = row;
   delete fridgeDraft[id];
   if (!fridgeDay) fridgeDay = {};
   fridgeDay["r_" + id] = row;
   saveFridgeFields(patch);
 }
+
 var fridgeWriteChain = Promise.resolve();
 function saveFridgeFields(patch) {
   if (!fridgeEditable()) return;
@@ -5461,7 +5515,7 @@ function openFridgeReport() {
   var s = fridgeRep, t = todayStr();
   if (!s.from) { var x = dateFromStr(t); x.setDate(x.getDate() - 6); s.from = ymd(x); s.to = t; }
   var modes = [["hoje","Hoje"],["ontem","Ontem"],["7d","Últimos 7 dias"],["mes","Este mês"],["periodo","Escolher datas"]];
-  var html = '<h2>📄 Relatório da geladeira</h2><div class="sub">Resumo do que foi abastecido, da contagem final e da saída de cada bebida no período.</div>' +
+  var html = '<h2>📄 Relatório da geladeira</h2><div class="sub">Resumo das contagens, do que foi abastecido e da saída de cada bebida por turno no período.</div>' +
     '<div class="field"><label>Período</label><div class="chip-group" id="frModes">' +
       modes.map(function(m){ return '<div class="chip' + (s.mode === m[0] ? ' selected' : '') + '" data-frm="' + m[0] + '">' + m[1] + '</div>'; }).join("") + '</div></div>' +
     '<div class="row2" id="frDates" style="' + (s.mode === "periodo" ? '' : 'display:none;') + '">' +
@@ -5494,7 +5548,8 @@ function openFridgeReport() {
     var q = db.collection("fridge");
     if (!(s.all && fridgeRepCanAll())) q = q.where("storeId", "==", currentStoreId);
     // busca também o dia anterior ao início, para calcular a saída do primeiro dia
-    q.where("date", ">=", prevDateStr(r.from)).where("date", "<=", r.to).get().then(function(qs){
+    var nxt = dateFromStr(r.to); nxt.setDate(nxt.getDate() + 1);
+    q.where("date", ">=", prevDateStr(r.from)).where("date", "<=", ymd(nxt)).get().then(function(qs){
       closeSheet();
       buildFridgeReport(r, qs.docs.map(function(d){ return d.data(); }), s.all && fridgeRepCanAll());
     }).catch(function(err){ btn.disabled = false; btn.textContent = "Gerar relatório"; showToast("Não foi possível buscar: " + errMsg(err)); });
@@ -5502,81 +5557,73 @@ function openFridgeReport() {
 }
 
 function buildFridgeReport(r, docs, allStores) {
-  // índice loja -> data -> documento
   var byStore = {};
   docs.forEach(function(d){ if (!d || !d.storeId || !d.date) return; (byStore[d.storeId] = byStore[d.storeId] || {})[d.date] = d; });
   var days = []; for (var x = dateFromStr(r.from); ymd(x) <= r.to; x.setDate(x.getDate() + 1)) days.push(ymd(x));
+  function nextDay(ds) { var y = dateFromStr(ds); y.setDate(y.getDate() + 1); return ymd(y); }
   var sids = allStores ? storeOrder.filter(function(sid){ return stores[sid] && byStore[sid]; }) : [currentStoreId];
-  Object.keys(byStore).forEach(function(sid){ if (allStores && sids.indexOf(sid) === -1) sids.push(sid); });
-  var cfgItems = fridgeItems();
   function n(v) { return numOrNull(v); }
   function q(v) { return v === null || v === undefined ? "—" : fmtQty(v); }
-  var body = "", grand = {ab: 0, said: 0, daysWith: 0};
-
+  var body = "";
   sids.forEach(function(sid){
-    var sd = byStore[sid] || {}, sname = stores[sid] ? stores[sid].name : ((Object.values(sd)[0] || {}).storeName || sid);
-    // itens: os da lista atual + os que aparecem nos lançamentos (itens removidos depois)
-    var items = cfgItems.map(function(it){ return {id: it.id, name: it.name}; }), seen = {};
-    items.forEach(function(it){ seen[it.id] = 1; });
+    var sd = byStore[sid] || {}, sname = stores[sid] ? stores[sid].name : sid;
+    var items = [], seen = {};
     days.forEach(function(dd){ var doc = sd[dd]; if (!doc) return;
-      Object.keys(doc).forEach(function(k){ if (k.indexOf("r_") === 0) { var id = k.slice(2); if (!seen[id]) { seen[id] = 1; items.push({id: id, name: doc[k].name || id}); } } });
+      Object.keys(doc).forEach(function(kk){ if (kk.indexOf("r_") === 0) { var id = kk.slice(2); if (!seen[id]) { seen[id] = 1; items.push({id: id, name: doc[kk].name || (products[id] ? products[id].name : id)}); } } });
     });
-    var sum = {}; items.forEach(function(it){ sum[it.id] = {lunch: 0, dinner: 0, ab: 0, said: 0, saidDays: 0, lastFin: null}; });
-    var dayHtml = "", missing = [], st = {ab: 0, said: 0, saidKnown: 0};
+    items.sort(function(a,b){ return (a.name||"").localeCompare(b.name||"", "pt-BR"); });
+    var sum = {}; items.forEach(function(it){ sum[it.id] = {ab: 0, lunch: 0, dinner: 0, said: 0, days: 0}; });
+    var dayHtml = "", missing = [], st = {ab: 0, said: 0, saidN: 0};
     days.forEach(function(dd){
-      var doc = sd[dd], prev = sd[prevDateStr(dd)];
+      var doc = sd[dd], prev = sd[prevDateStr(dd)], next = sd[nextDay(dd)];
       if (!doc) { missing.push(fmtDayBr(dd).slice(0, 5)); return; }
-      var rowsHtml = "", dt = {lunch: 0, dinner: 0, ab: 0, fin: 0, finN: 0, said: 0, saidN: 0}, who = {};
+      var rows = "", dt = {ab: 0, lunch: 0, lunchN: 0, dinner: 0, dinnerN: 0}, who = {};
       items.forEach(function(it){
         var row = doc["r_" + it.id]; if (!row) return;
-        var lq = n(row.lunchQty), dq = n(row.dinnerQty), fin = n(row.finalCount);
-        if (lq === null && dq === null && fin === null) return;
-        var ab = (lq || 0) + (dq || 0);
-        var pr = prev && prev["r_" + it.id], pf = pr ? n(pr.finalCount) : null;
-        var said = (fin !== null && pf !== null) ? pf + ab - fin : null;
-        var S = sum[it.id];
-        S.lunch += lq || 0; S.dinner += dq || 0; S.ab += ab; if (said !== null) { S.said += said; S.saidDays++; } if (fin !== null) S.lastFin = fin;
-        dt.lunch += lq || 0; dt.dinner += dq || 0; dt.ab += ab; if (fin !== null) { dt.fin += fin; dt.finN++; } if (said !== null) { dt.said += said; dt.saidN++; }
         if (row.by) who[row.by] = 1;
-        rowsHtml += '<tr><td>' + esc(it.name) + '</td>' +
-          '<td class="n">' + q(lq) + (row.lunchTime ? ' <span class="pr-muted">' + esc(row.lunchTime) + '</span>' : '') + '</td>' +
-          '<td class="n">' + q(dq) + (row.dinnerTime ? ' <span class="pr-muted">' + esc(row.dinnerTime) + '</span>' : '') + '</td>' +
-          '<td class="n"><b>' + fmtQty(ab) + '</b></td><td class="n">' + q(fin) + '</td>' +
-          '<td class="n"' + (said !== null && said < 0 ? ' style="color:#b42318;"' : '') + '><b>' + (said !== null ? fmtQty(said) : (fin === null ? '—' : 's/ sobra ant.')) + '</b></td></tr>';
+        var S = sum[it.id];
+        if (row.lunchCount !== undefined || row.dinnerCount !== undefined) {
+          var k = fridgeCalc(row, prev && prev["r_" + it.id], next && next["r_" + it.id]);
+          S.ab += k.ab; dt.ab += k.ab;
+          if (k.lunch !== null) { S.lunch += k.lunch; S.said += k.lunch; dt.lunch += k.lunch; dt.lunchN++; }
+          if (k.dinner !== null) { S.dinner += k.dinner; S.said += k.dinner; dt.dinner += k.dinner; dt.dinnerN++; }
+          if (k.lunch !== null || k.dinner !== null) S.days++;
+          rows += '<tr><td>' + esc(it.name) + '</td><td class="n">' + q(n(row.lunchCount)) + '</td><td class="n">' + q(n(row.lunchQty)) + '</td><td class="n">' + q(n(row.dinnerCount)) + '</td><td class="n">' + q(n(row.dinnerQty)) + '</td>' +
+            '<td class="n"><b>' + q(k.lunch) + '</b></td><td class="n"><b>' + q(k.dinner) + '</b></td></tr>';
+        } else {
+          // registro antigo (abastecido + sobra)
+          var lq = n(row.lunchQty) || 0, dq = n(row.dinnerQty) || 0, fin = n(row.finalCount), pr = prev && prev["r_" + it.id], pf = pr ? n(pr.finalCount) : null;
+          var said = (fin !== null && pf !== null) ? pf + lq + dq - fin : null;
+          S.ab += lq + dq; dt.ab += lq + dq; if (said !== null) { S.said += said; S.days++; dt.lunch += said; dt.lunchN++; }
+          rows += '<tr><td>' + esc(it.name) + ' <span class="pr-muted">(modelo antigo)</span></td><td class="n">—</td><td class="n">' + q(lq) + '</td><td class="n">—</td><td class="n">' + q(dq) + '</td><td class="n" colspan="2"><b>' + q(said) + '</b> no dia</td></tr>';
+        }
       });
-      st.ab += dt.ab; if (dt.saidN) { st.said += dt.said; st.saidKnown++; }
-      grand.daysWith++;
+      st.ab += dt.ab; if (dt.lunchN || dt.dinnerN) { st.said += dt.lunch + dt.dinner; st.saidN++; }
       dayHtml += '<div class="pr-sub" style="margin-top:14px;">' + fmtWeekdayBr(dd) + ', ' + fmtDayBr(dd) + '</div>';
-      if (!rowsHtml) { dayHtml += '<div class="pr-muted">Registro aberto, mas sem quantidades lançadas.</div>'; return; }
-      dayHtml += '<div style="overflow-x:auto;"><table class="pr-table"><thead><tr><th>Bebida</th><th class="n">Almoço</th><th class="n">Jantar</th><th class="n">Abastecido</th><th class="n">Contagem final</th><th class="n">Saída</th></tr></thead><tbody>' + rowsHtml +
-        '<tr class="pr-total"><td>Total do dia</td><td class="n">' + fmtQty(dt.lunch) + '</td><td class="n">' + fmtQty(dt.dinner) + '</td><td class="n">' + fmtQty(dt.ab) + '</td><td class="n">' + (dt.finN ? fmtQty(dt.fin) : '—') + '</td><td class="n">' + (dt.saidN ? fmtQty(dt.said) : '—') + '</td></tr></tbody></table></div>';
+      if (!rows) { dayHtml += '<div class="pr-muted">Registro aberto, mas sem quantidades lançadas.</div>'; return; }
+      dayHtml += '<div style="overflow-x:auto;"><table class="pr-table"><thead><tr><th>Bebida</th><th class="n">Cont. ' + FRIDGE_SHIFTS.lunch + '</th><th class="n">Abast. ' + FRIDGE_SHIFTS.lunch + '</th><th class="n">Cont. ' + FRIDGE_SHIFTS.dinner + '</th><th class="n">Abast. ' + FRIDGE_SHIFTS.dinner + '</th><th class="n">Saída almoço</th><th class="n">Saída jantar</th></tr></thead><tbody>' + rows +
+        '<tr class="pr-total"><td>Total do dia</td><td></td><td class="n">' + '</td><td></td><td></td><td class="n">' + (dt.lunchN ? fmtQty(dt.lunch) : '—') + '</td><td class="n">' + (dt.dinnerN ? fmtQty(dt.dinner) : '—') + '</td></tr></tbody></table></div>';
       var info = [];
       if (Object.keys(who).length) info.push("Lançado por: " + Object.keys(who).join(", "));
       if (doc.notes) info.push("Obs.: " + doc.notes);
       if (info.length) dayHtml += '<div class="pr-muted" style="margin-top:4px;">' + info.map(esc).join(" · ") + '</div>';
     });
-    grand.ab += st.ab; grand.said += st.said;
-
-    // resumo do período por bebida
-    var sumRows = items.filter(function(it){ var S = sum[it.id]; return S.ab || S.saidDays || S.lastFin !== null; });
+    var sumRows = items.filter(function(it){ var S = sum[it.id]; return S.ab || S.days; });
     body += '<h2 class="pr-h2">' + esc(sname) + '</h2>';
     body += '<div class="pr-kpis"><div><span>Dias com lançamento</span><b>' + (days.length - missing.length) + ' de ' + days.length + '</b></div>' +
-      '<div><span>Total abastecido</span><b>' + fmtQty(st.ab) + '</b></div><div><span>Saída total</span><b>' + (st.saidKnown ? fmtQty(st.said) : '—') + '</b></div></div>';
+      '<div><span>Total abastecido</span><b>' + fmtQty(st.ab) + '</b></div><div><span>Saída total</span><b>' + (st.saidN ? fmtQty(st.said) : '—') + '</b></div></div>';
     if (missing.length) body += '<div class="pr-warn">Dias sem lançamento: ' + esc(missing.join(", ")) + '</div>';
     if (sumRows.length) {
-      body += '<div class="pr-sub">Resumo do período por bebida</div><div style="overflow-x:auto;"><table class="pr-table"><thead><tr><th>Bebida</th><th class="n">Almoço</th><th class="n">Jantar</th><th class="n">Abastecido</th><th class="n">Saída</th><th class="n">Média/dia</th><th class="n">Última sobra</th></tr></thead><tbody>';
-      var tl = 0, td = 0, ta = 0, ts = 0;
-      sumRows.sort(function(a, b){ return sum[b.id].said - sum[a.id].said; }).forEach(function(it){
-        var S = sum[it.id]; tl += S.lunch; td += S.dinner; ta += S.ab; ts += S.said;
-        body += '<tr><td>' + esc(it.name) + '</td><td class="n">' + fmtQty(S.lunch) + '</td><td class="n">' + fmtQty(S.dinner) + '</td><td class="n"><b>' + fmtQty(S.ab) + '</b></td>' +
-          '<td class="n"><b>' + (S.saidDays ? fmtQty(S.said) : '—') + '</b></td><td class="n">' + (S.saidDays ? fmtQty(Math.round(S.said / S.saidDays * 10) / 10) : '—') + '</td><td class="n">' + q(S.lastFin) + '</td></tr>';
+      body += '<div class="pr-sub">Resumo do período por bebida</div><div style="overflow-x:auto;"><table class="pr-table"><thead><tr><th>Bebida</th><th class="n">Abastecido</th><th class="n">Saída almoço</th><th class="n">Saída jantar</th><th class="n">Saída total</th><th class="n">Média/dia</th></tr></thead><tbody>';
+      var ta = 0, tl = 0, tj = 0, ts = 0;
+      sumRows.sort(function(a,b){ return sum[b.id].said - sum[a.id].said; }).forEach(function(it){
+        var S = sum[it.id]; ta += S.ab; tl += S.lunch; tj += S.dinner; ts += S.said;
+        body += '<tr><td>' + esc(it.name) + '</td><td class="n">' + fmtQty(S.ab) + '</td><td class="n">' + fmtQty(S.lunch) + '</td><td class="n">' + fmtQty(S.dinner) + '</td><td class="n"><b>' + fmtQty(S.said) + '</b></td><td class="n">' + (S.days ? fmtQty(Math.round(S.said / S.days * 10) / 10) : '—') + '</td></tr>';
       });
-      body += '<tr class="pr-total"><td>Total</td><td class="n">' + fmtQty(tl) + '</td><td class="n">' + fmtQty(td) + '</td><td class="n">' + fmtQty(ta) + '</td><td class="n">' + fmtQty(ts) + '</td><td></td><td></td></tr></tbody></table></div>';
-      body += '<div class="pr-muted" style="margin-top:3px;">Ordenado pela maior saída. Saída = sobra do dia anterior + abastecido − contagem final. Média/dia considera só os dias em que a saída pôde ser calculada.</div>';
+      body += '<tr class="pr-total"><td>Total</td><td class="n">' + fmtQty(ta) + '</td><td class="n">' + fmtQty(tl) + '</td><td class="n">' + fmtQty(tj) + '</td><td class="n">' + fmtQty(ts) + '</td><td></td></tr></tbody></table></div>';
+      body += '<div class="pr-muted" style="margin-top:3px;">Saída almoço = contagem ' + FRIDGE_SHIFTS.lunch + ' + abastecido ' + FRIDGE_SHIFTS.lunch + ' − contagem ' + FRIDGE_SHIFTS.dinner + '. Saída jantar = contagem ' + FRIDGE_SHIFTS.dinner + ' + abastecido ' + FRIDGE_SHIFTS.dinner + ' − contagem ' + FRIDGE_SHIFTS.lunch + ' do dia seguinte.</div>';
       body += '<div class="pr-sub" style="margin-top:16px;">Lançamentos dia a dia</div>' + dayHtml;
-    } else {
-      body += '<div class="pr-muted">Nenhum lançamento de geladeira no período.</div>';
-    }
+    } else body += '<div class="pr-muted">Nenhum lançamento de geladeira no período.</div>';
   });
   if (!sids.length) body = '<div class="pr-muted">Nenhum lançamento de geladeira no período.</div>';
   var title = "Contagem de geladeira — " + (allStores ? "Todas as lojas" : (stores[currentStoreId] ? stores[currentStoreId].name : ""));
@@ -5585,42 +5632,38 @@ function buildFridgeReport(r, docs, allStores) {
 
 function openFridgeListEditor() {
   if (!canManageFridge()) return;
-  var list = fridgeItems().map(function(x){ return {id: x.id, name: x.name}; });
+  var sel = {}; fridgeAllProductIds().forEach(function(pid){ sel[pid] = 1; });
+  var q = "";
   function draw() {
-    var html = '<h2>Itens da contagem de geladeira</h2><div class="sub">Vale para todas as lojas. Contagens já feitas não são apagadas.</div>';
-    list.forEach(function(it, i){
-      html += '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">' +
-        '<input type="text" data-li="' + i + '" value="' + esc(it.name) + '" style="flex:1;padding:9px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:14px;">' +
-        '<button data-up="' + i + '" class="link-btn" style="padding:0 4px;"' + (i===0?' disabled':'') + '>↑</button>' +
-        '<button data-rm="' + i + '" class="link-btn link-danger" style="padding:0 4px;">✕</button></div>';
-    });
-    html += '<button class="link-btn" id="fgAdd">+ Adicionar item</button>' +
-      '<button class="btn btn-primary" id="fgSaveList" style="margin-top:10px;">Salvar lista</button>' +
-      '<button class="btn btn-secondary" id="fgCancelList">Cancelar</button>';
-    openSheet(html);
-    sheet.querySelectorAll("[data-li]").forEach(function(inp){ inp.addEventListener("input", function(){ list[+inp.getAttribute("data-li")].name = inp.value; }); });
-    sheet.querySelectorAll("[data-rm]").forEach(function(b){ b.addEventListener("click", function(){ list.splice(+b.getAttribute("data-rm"), 1); draw(); }); });
-    sheet.querySelectorAll("[data-up]").forEach(function(b){ b.addEventListener("click", function(){ var i = +b.getAttribute("data-up"); if (i>0) { var t = list[i]; list[i] = list[i-1]; list[i-1] = t; draw(); } }); });
-    document.getElementById("fgAdd").addEventListener("click", function(){
-      var max = 0; list.forEach(function(x){ var n = parseInt(String(x.id).replace(/\D/g,""),10); if (n > max) max = n; });
-      list.push({id: "f" + (max + 1) + "_" + Date.now().toString(36), name: ""}); draw();
-      var last = sheet.querySelector('[data-li="' + (list.length-1) + '"]'); if (last) last.focus();
-    });
+    var t = normTxt(q);
+    var pids = productOrder.filter(function(pid){ return !products[pid].centralOnly && (!t || normTxt(products[pid].name).indexOf(t) !== -1); });
+    var drinks = pids.filter(function(pid){ return fridgeIsDrinkCat(products[pid].categoryId); }), others = pids.filter(function(pid){ return !fridgeIsDrinkCat(products[pid].categoryId); });
+    function row(pid) {
+      var p = products[pid], lbl = productStoresLabel(p) || "Todas as lojas";
+      return '<label class="fg-pick"><input type="checkbox" data-fgp="' + pid + '"' + (sel[pid] ? ' checked' : '') + '> <span>' + esc(p.name) + '<small>🏬 ' + esc(lbl) + '</small></span></label>';
+    }
+    var h = '<h2>🥤 Bebidas da geladeira</h2><div class="sub">Marque o que vai para a geladeira. Cada loja só vê as bebidas <b>vinculadas a ela</b> no cadastro do produto (Produtos → Lojas que usam este produto).</div>' +
+      '<div class="searchbar"><input id="fgPickQ" type="text" placeholder="Filtrar…" value="' + esc(q) + '"></div>' +
+      '<div class="chart-title">Bebidas (' + drinks.length + ')</div>' + drinks.map(row).join("") +
+      (others.length && t ? '<div class="chart-title" style="margin-top:12px;">Outros produtos</div>' + others.slice(0, 40).map(row).join("") : '') +
+      '<div style="position:sticky;bottom:0;background:var(--surface);padding-top:8px;"><button class="btn btn-primary" id="fgSaveList">Salvar lista</button><button class="btn btn-secondary" id="fgCancelList">Cancelar</button></div>';
+    openSheet(h);
+    sheet.querySelectorAll("[data-fgp]").forEach(function(cb){ cb.addEventListener("change", function(){ var pid = cb.getAttribute("data-fgp"); if (cb.checked) sel[pid] = 1; else delete sel[pid]; }); });
+    var qi = document.getElementById("fgPickQ");
+    qi.addEventListener("input", function(){ q = qi.value; var pos = qi.selectionStart; draw(); var n = document.getElementById("fgPickQ"); n.focus(); n.setSelectionRange(pos, pos); });
     document.getElementById("fgCancelList").addEventListener("click", closeSheet);
     document.getElementById("fgSaveList").addEventListener("click", function(){
-      var clean = list.map(function(x){ return {id: x.id, name: String(x.name||"").trim()}; }).filter(function(x){ return x.name; });
-      if (!clean.length) { showToast("A lista precisa ter ao menos um item"); return; }
-      db.doc("meta/fridgeConfig").set({items: clean, updatedAt: Date.now(), updatedByName: currentEmployeeName || ""})
-        .then(function(){ closeSheet(); showToast("Lista atualizada"); })
+      var ids = productOrder.filter(function(pid){ return sel[pid]; });
+      var snap = ids.map(function(pid){ var p = products[pid]; return {id: pid, name: p.name, storeIds: p.storeIds || []}; });
+      var ref = db.doc("meta/fridgeConfig"), data = {productIds: ids, snapshot: snap, updatedAt: Date.now(), updatedByName: currentEmployeeName || ""};
+      ref.get().then(function(s){ return s.exists ? ref.update(data) : ref.set(data); })
+        .then(function(){ closeSheet(); showToast("Lista da geladeira atualizada"); })
         .catch(function(err){ showToast("Erro: " + errMsg(err)); });
     });
   }
   draw();
 }
 
-// ============================================================
-// ATUALIZAR PREÇOS (subgrupo de Produtos)
-// ============================================================
 var PRICE_ROLES = ["Operador de Estoque","Gerência","Diretoria"];
 var priceDraft = {};        // productId -> texto digitado
 var priceCatFilter = "";
@@ -6217,7 +6260,7 @@ init();
 <div id="updBar" style="display:none;position:fixed;left:12px;right:12px;bottom:14px;z-index:9999;background:#1f6f43;color:#fff;border-radius:14px;padding:13px 16px;font:600 14.5px/1.3 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;text-align:center;">🔄 Saiu uma versão nova do sistema. <u>Toque aqui para atualizar</u></div>
 <script>
 (function(){
-  var APP_BUILD = "20261017173113";
+  var APP_BUILD = "20261017175234";
   var bar = document.getElementById("updBar"), checking = false;
   bar.addEventListener("click", function(){ location.reload(); });
   function check() {
