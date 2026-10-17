@@ -777,11 +777,14 @@ function openPinPrompt(empId) {
 // Produto vinculado a lojas: sem lojas marcadas = vale para todas; o Estoque Central vê todos.
 function productInStore(pid, sid) {
   var p = products[pid]; if (!p) return false;
-  var s = stores[sid]; if (!s || s.isCentral) return true;
+  var s = stores[sid];
+  if (p.centralOnly) return !!(s && s.isCentral);
+  if (!s || s.isCentral) return true;
   return !p.storeIds || !p.storeIds.length || p.storeIds.indexOf(sid) !== -1;
 }
 function storeProductOrder(sid) { return productOrder.filter(function(pid){ return productInStore(pid, sid); }); }
 function productStoresLabel(p) {
+  if (p && p.centralOnly) return "Somente Estoque Central";
   if (!p || !p.storeIds || !p.storeIds.length) return "";
   return p.storeIds.filter(function(s){ return stores[s]; }).map(function(s){ return stores[s].name; }).join(", ");
 }
@@ -2296,12 +2299,13 @@ function openProductForm(id) {
       PROD_KIND_OPTS.map(function(o){ return '<option value="' + o.v + '"' + (((p && p.prodType) || "") === o.v ? ' selected' : '') + '>' + o.l + '</option>'; }).join("") + '</select>' +
       '<div id="pProdTypeInfo" style="font-size:11.5px;color:var(--text-2);margin-top:4px;"></div></div>' +
     '<div class="field"><label>Lojas que usam este produto</label>' +
-      '<div style="font-size:11.5px;color:var(--text-2);margin:-2px 0 8px 0;">Nenhuma marcada = <b>todas as lojas</b>. O Estoque Central sempre vê todos os produtos.</div>' +
+      '<label class="checkbox-row" style="margin:0 0 8px 0;' + (readOnly ? 'pointer-events:none;opacity:.8;' : '') + '"><input type="checkbox" id="pCentralOnly"' + (p && p.centralOnly ? ' checked' : '') + (readOnly ? ' disabled' : '') + '> <span><b>🏭 Somente Estoque Central</b><br><small style="color:var(--text-2);">Matéria-prima recebida bruta que ainda será produzida (ex.: coxão mole, picanha e mignon em peça). As lojas não veem este produto.</small></span></label>' +
+      '<div id="pStoresWrap"><div style="font-size:11.5px;color:var(--text-2);margin:-2px 0 8px 0;">Nenhuma marcada = <b>todas as lojas</b>. O Estoque Central sempre vê todos os produtos.</div>' +
       '<div class="chip-group" id="pStores">' + storeOrder.filter(function(sid){ return stores[sid] && !stores[sid].isCentral; }).map(function(sid){
         var on = p && p.storeIds && p.storeIds.indexOf(sid) !== -1;
         return '<div class="chip' + (on ? ' selected' : '') + '" data-psid="' + sid + '"' + (readOnly ? ' style="pointer-events:none;opacity:.8;"' : '') + '>' + esc(stores[sid].name) + '</div>';
       }).join("") + '</div>' +
-      '<div id="pStoresInfo" style="font-size:12px;margin-top:6px;color:var(--accent);font-weight:600;"></div></div>' +
+      '<div id="pStoresInfo" style="font-size:12px;margin-top:6px;color:var(--accent);font-weight:600;"></div></div></div>' +
     '<details style="margin-bottom:14px;"><summary style="font-size:13px;font-weight:600;color:var(--text-2);cursor:pointer;padding:4px 0;">Mais opções</summary>' +
       '<div class="row2" style="margin-top:10px;"><div class="field"><label>Estoque mínimo</label><input type="number" inputmode="decimal" id="pMin" value="' + (p?fmtQtyRaw(p.minStock):"0") + '" min="0" step="any" ' + dis + '></div>' +
       '<div class="field"><label>Código (opcional)</label><input type="text" id="pSku" value="' + (p?esc(p.sku||""):"") + '" ' + dis + '></div></div>' +
@@ -2324,6 +2328,16 @@ function openProductForm(id) {
   pKindInfo();
   document.getElementById("pProdType").addEventListener("change", pKindInfo);
   document.getElementById("pUnit").addEventListener("change", pKindInfo);
+  function pCentralSync() {
+    var on = document.getElementById("pCentralOnly").checked;
+    document.getElementById("pStoresWrap").style.display = on ? "none" : "";
+  }
+  document.getElementById("pCentralOnly").addEventListener("change", function(e){
+    pCentralSync();
+    // produto novo marcado como só do Central: sugere a área "Não produzido (bruto)"
+    if (e.target.checked && !p) { var k = document.getElementById("pProdType"); if (k && !k.value || k && k.value === "produzido") { k.value = "bruto"; k.dispatchEvent(new Event("change")); } }
+  });
+  setTimeout(pCentralSync, 0);
   function pStoresInfo() {
     var el = document.getElementById("pStoresInfo"); if (!el) return;
     el.textContent = pStoreSel.length ? "Somente: " + pStoreSel.map(function(s){ return stores[s] ? stores[s].name : ""; }).join(", ") : "Todas as lojas";
@@ -2355,7 +2369,8 @@ function openProductForm(id) {
       sku: document.getElementById("pSku").value.trim(),
       minStock: parseFloat(document.getElementById("pMin").value) || 0,
       perishable: document.getElementById("pPer").checked,
-      storeIds: storeOrder.filter(function(s){ return pStoreSel.indexOf(s) !== -1; }),
+      centralOnly: document.getElementById("pCentralOnly").checked,
+      storeIds: document.getElementById("pCentralOnly").checked ? [] : storeOrder.filter(function(s){ return pStoreSel.indexOf(s) !== -1; }),
       prodType: document.getElementById("pProdType").value || ""
     };
     var btn = document.getElementById("bSave");
@@ -2382,12 +2397,12 @@ function openProductForm(id) {
 }
 
 // ---------- Alteração/exclusão de produto: senha da Diretoria + motivo + histórico ----------
-var PRODUCT_FIELD_LABELS = {prodType:"Área no estoque", name:"Nome", weight:"Peso", weightUnit:"Unidade do peso", unit:"Tipo", cost:"Custo", categoryId:"Gênero", sku:"Código", minStock:"Estoque mínimo", perishable:"Perecível", storeIds:"Lojas"};
+var PRODUCT_FIELD_LABELS = {centralOnly:"Somente Estoque Central", prodType:"Área no estoque", name:"Nome", weight:"Peso", weightUnit:"Unidade do peso", unit:"Tipo", cost:"Custo", categoryId:"Gênero", sku:"Código", minStock:"Estoque mínimo", perishable:"Perecível", storeIds:"Lojas"};
 function productFieldText(f, v) {
   if (f === "categoryId") return v && categories[v] ? categories[v].name : "Sem gênero";
   if (f === "unit") return typeLabel(v);
   if (f === "cost") return fmtMoney(v || 0);
-  if (f === "perishable") return v ? "Sim" : "Não";
+  if (f === "perishable" || f === "centralOnly") return v ? "Sim" : "Não";
   if (f === "prodType") return prodKindLabel(v);
   if (f === "storeIds") return v && v.length ? v.map(function(s){ return stores[s] ? stores[s].name : "?"; }).join(", ") : "Todas as lojas";
   if (v === null || v === undefined || v === "") return "—";
@@ -2398,7 +2413,7 @@ function productChanges(p, data) {
   Object.keys(PRODUCT_FIELD_LABELS).forEach(function(f){
     var a = p[f], b = data[f];
     if (f === "weight" || f === "cost" || f === "minStock") { a = parseFloat(a) || 0; b = parseFloat(b) || 0; }
-    else if (f === "perishable") { a = !!a; b = !!b; }
+    else if (f === "perishable" || f === "centralOnly") { a = !!a; b = !!b; }
     else if (f === "storeIds") { a = (a || []).slice().sort().join(","); b = (b || []).slice().sort().join(","); }
     else if (f === "prodType") { a = a || ""; b = b || ""; }
     else { a = (a === undefined || a === null) ? "" : a; b = (b === undefined || b === null) ? "" : b; }
