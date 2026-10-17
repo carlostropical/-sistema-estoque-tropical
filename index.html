@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261017175234">
+<meta name="app-build" content="20261017182004">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -375,6 +375,9 @@
 .fg-out b { color:var(--text); font-size:15px; margin-left:3px; } .fg-out i { font-style:normal; font-size:11.5px; margin-left:3px; }
 .fg-pick { display:flex; gap:10px; align-items:flex-start; padding:8px 2px; border-bottom:1px solid var(--border); font-size:14px; cursor:pointer; }
 .fg-pick input { width:19px; height:19px; margin-top:1px; flex:none; } .fg-pick small { display:block; font-size:11.5px; color:var(--text-2); }
+.cat-kind { margin-top:3px; font-size:12px; } .cat-kind small { color:var(--accent); font-weight:600; margin-left:4px; }
+.ck { display:inline-block; padding:1px 8px; border-radius:10px; font-weight:700; font-size:11.5px; }
+.ck-food { background:#e7f3ec; color:#1f6f43; } .ck-other { background:#e8eefc; color:#3554a5; }
 </style>
 </head>
 <body class="locked">
@@ -2526,7 +2529,15 @@ function typeLabel(u) {
   for (var i=0;i<PRODUCT_TYPES.length;i++) if (PRODUCT_TYPES[i].v===u) return PRODUCT_TYPES[i].l;
   return u || "Unidade";
 }
+var CAT_KINDS = [{v: "alimenticio", l: "🍽️ Alimentício", d: "alimentos, bebidas…"}, {v: "nao_alimenticio", l: "🧽 Limpeza, embalagens ou manutenção", d: "pede a finalidade de uso"}];
+function catKind(cid) {
+  var cat = cid && categories[cid]; if (!cat) return "alimenticio";
+  if (cat.kind) return cat.kind;
+  return /limpeza|embalage|manuten|descart|higien/i.test(cat.name || "") ? "nao_alimenticio" : "alimenticio";
+}
+function productIsNonFood(p) { return !!p && catKind(p.categoryId) === "nao_alimenticio"; }
 function weightLabel(p) {
+  if (productIsNonFood(p)) return p.usePurpose ? "Uso: " + esc(p.usePurpose) : "";
   if (!p || !p.weight) return "";
   return fmtQty(p.weight) + " " + (p.weightUnit || "g");
 }
@@ -2544,7 +2555,8 @@ function openProductForm(id) {
     (p && !readOnly ? '<div class="sub" style="color:var(--text-2);">🔒 Alterações e exclusões pedem sua senha e o motivo, e ficam registradas no histórico.</div>' : '') +
     '<div class="field"><label>Produto*</label><input type="text" id="pName" placeholder="Ex: Costela" value="' + (p?esc(p.name):"") + '" ' + dis + '></div>' +
     '<div class="row2">' +
-      '<div class="field"><label>Peso do produto</label><div style="display:flex;gap:6px;">' +
+      '<div class="field" id="pPurposeField" style="display:none;"><label>Finalidade de uso</label><input type="text" id="pPurpose" placeholder="Ex: limpeza da cozinha, embalar delivery" value="' + esc(p && p.usePurpose || "") + '" ' + dis + '></div>' +
+      '<div class="field" id="pWeightField"><label>Peso do produto</label><div style="display:flex;gap:6px;">' +
         '<input type="number" inputmode="decimal" id="pWeight" min="0" step="any" placeholder="Ex: 200" value="' + (p&&p.weight?esc(p.weight):"") + '" ' + dis + ' style="flex:1;min-width:0;">' +
         '<select id="pWeightUnit" ' + dis + ' style="width:70px;">' + WEIGHT_UNITS.map(function(u){ return '<option'+(wu===u?" selected":"")+'>'+u+'</option>'; }).join("") + '</select>' +
       '</div></div>' +
@@ -2578,6 +2590,13 @@ function openProductForm(id) {
   var bphi = document.getElementById("bPHist"); if (bphi) bphi.addEventListener("click", function(){ openProductHistory(id); });
   var bpn = document.getElementById("bPNeeds"); if (bpn) bpn.addEventListener("click", function(){ openProductNeeds(id); });
   if (readOnly) return;
+  function pKindSync() {
+    var nf = catKind(document.getElementById("pCat").value) === "nao_alimenticio";
+    document.getElementById("pPurposeField").style.display = nf ? "" : "none";
+    document.getElementById("pWeightField").style.display = nf ? "none" : "";
+  }
+  pKindSync();
+  document.getElementById("pCat").addEventListener("change", pKindSync);
   var pStoreSel = (p && p.storeIds) ? p.storeIds.slice() : [];
   function pKindInfo() {
     var k = document.getElementById("pProdType"), el = document.getElementById("pProdTypeInfo"); if (!k || !el) return;
@@ -2620,7 +2639,8 @@ function openProductForm(id) {
     if (costStr === "") costStr = String(p.cost || 0);
     var data = {
       name: name,
-      weight: parseFloat(document.getElementById("pWeight").value) || 0,
+      weight: catKind(document.getElementById("pCat").value) === "nao_alimenticio" ? 0 : (parseFloat(document.getElementById("pWeight").value) || 0),
+      usePurpose: catKind(document.getElementById("pCat").value) === "nao_alimenticio" ? document.getElementById("pPurpose").value.trim() : "",
       weightUnit: document.getElementById("pWeightUnit").value,
       unit: document.getElementById("pUnit").value,
       cost: parseFloat(costStr) || 0,
@@ -2656,7 +2676,7 @@ function openProductForm(id) {
 }
 
 // ---------- Alteração/exclusão de produto: senha da Diretoria + motivo + histórico ----------
-var PRODUCT_FIELD_LABELS = {centralOnly:"Somente Estoque Central", prodType:"Área no estoque", name:"Nome", weight:"Peso", weightUnit:"Unidade do peso", unit:"Tipo", cost:"Custo", categoryId:"Gênero", sku:"Código", minStock:"Estoque mínimo", perishable:"Perecível", storeIds:"Lojas"};
+var PRODUCT_FIELD_LABELS = {usePurpose:"Finalidade de uso", centralOnly:"Somente Estoque Central", prodType:"Área no estoque", name:"Nome", weight:"Peso", weightUnit:"Unidade do peso", unit:"Tipo", cost:"Custo", categoryId:"Gênero", sku:"Código", minStock:"Estoque mínimo", perishable:"Perecível", storeIds:"Lojas"};
 function productFieldText(f, v) {
   if (f === "categoryId") return v && categories[v] ? categories[v].name : "Sem gênero";
   if (f === "unit") return typeLabel(v);
@@ -2754,10 +2774,13 @@ function openCategoryManager() {
   var html = '<h2>Gêneros / Categorias</h2>';
   if (categoryOrder.length === 0) html += '<div class="empty-state" style="padding:20px;">Nenhum gênero cadastrado.</div>';
   categoryOrder.forEach(function(id){
-    html += '<div class="item-row" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' + esc(categories[id].name) +
+    var k = catKind(id);
+    html += '<div class="item-row" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><div><b>' + esc(categories[id].name) + '</b>' +
+      '<div class="cat-kind" data-ckind="' + id + '" style="' + (canDel ? 'cursor:pointer;' : '') + '"><span class="ck ' + (k === "alimenticio" ? 'ck-food' : 'ck-other') + '">' + (k === "alimenticio" ? CAT_KINDS[0].l : CAT_KINDS[1].l) + '</span>' + (canDel ? ' <small>trocar</small>' : '') + '</div></div>' +
       (canDel ? '<span style="white-space:nowrap;"><button class="link-btn" data-ren="' + id + '" style="padding:0;margin-right:12px;">Renomear</button><button class="link-btn link-danger" data-del="' + id + '" style="padding:0;">Excluir</button></span>' : '') + '</div>';
   });
   html += '<div class="field" style="margin-top:14px;"><label>Novo gênero</label><input type="text" id="newCat" placeholder="Ex: Bebidas"></div>' +
+    '<div class="field"><label>Tipo do gênero</label><select id="newCatKind">' + CAT_KINDS.map(function(k){ return '<option value="' + k.v + '">' + k.l + ' (' + k.d + ')</option>'; }).join("") + '</select></div>' +
     '<button class="btn btn-primary" id="bAddCat">Adicionar</button>' +
     '<button class="btn btn-secondary" id="bClose">Fechar</button>';
   openSheet(html);
@@ -2765,7 +2788,14 @@ function openCategoryManager() {
   document.getElementById("bAddCat").addEventListener("click", function () {
     var name = document.getElementById("newCat").value.trim();
     if (!name) return;
-    db.collection("categories").add({name:name, createdAt:Date.now()}).then(function(){ openCategoryManager(); showToast("Gênero adicionado"); });
+    db.collection("categories").add({name:name, kind: document.getElementById("newCatKind").value, createdAt:Date.now()}).then(function(){ openCategoryManager(); showToast("Gênero adicionado"); });
+  });
+  if (canDel) sheet.querySelectorAll("[data-ckind]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var cid = b.getAttribute("data-ckind"), nk = catKind(cid) === "alimenticio" ? "nao_alimenticio" : "alimenticio";
+      db.doc("categories/" + cid).update({kind: nk}).then(function(){ categories[cid].kind = nk; showToast("Tipo do gênero alterado"); openCategoryManager(); })
+        .catch(function(err){ showToast("Erro: " + errMsg(err)); });
+    });
   });
   sheet.querySelectorAll("[data-ren]").forEach(function(b){
     b.addEventListener("click", function(){
@@ -6260,7 +6290,7 @@ init();
 <div id="updBar" style="display:none;position:fixed;left:12px;right:12px;bottom:14px;z-index:9999;background:#1f6f43;color:#fff;border-radius:14px;padding:13px 16px;font:600 14.5px/1.3 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;text-align:center;">🔄 Saiu uma versão nova do sistema. <u>Toque aqui para atualizar</u></div>
 <script>
 (function(){
-  var APP_BUILD = "20261017175234";
+  var APP_BUILD = "20261017182004";
   var bar = document.getElementById("updBar"), checking = false;
   bar.addEventListener("click", function(){ location.reload(); });
   function check() {
