@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261017182004">
+<meta name="app-build" content="20261022140528">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -378,6 +378,11 @@
 .cat-kind { margin-top:3px; font-size:12px; } .cat-kind small { color:var(--accent); font-weight:600; margin-left:4px; }
 .ck { display:inline-block; padding:1px 8px; border-radius:10px; font-weight:700; font-size:11.5px; }
 .ck-food { background:#e7f3ec; color:#1f6f43; } .ck-other { background:#e8eefc; color:#3554a5; }
+#viewOnlyBar { background:#e8f0fd; color:#24427e; border-bottom:1px solid #b9cdf5; padding:9px 14px; font-size:13px; line-height:1.35; }
+.view-only-store #bAdd, .view-only-store #bReceiveShipment, .view-only-store #bReturnShipment, .view-only-store #bSendShipment,
+.view-only-store .actions-3, .view-only-store #pdNew, .view-only-store #bFulfill, .view-only-store #bTopicStart,
+.view-only-store #fgEditList, .view-only-store #bOdSuggest, .view-only-store #ndOrder { display:none !important; }
+.view-only-store .fgInp, .view-only-store #fgNotes { pointer-events:none; opacity:.65; }
 </style>
 </head>
 <body class="locked">
@@ -661,6 +666,7 @@ function navigate(route) {
 
 function renderRoute() {
   if (isFridgeOnly() && currentRoute !== "geladeira") { navigate("geladeira"); return; }
+  syncViewOnly();
   if (ROUTES[currentRoute] && ROUTES[currentRoute].storeScoped && storeOrder.length && storeRestricted() && !allowedStoreIds().length) {
     content.innerHTML = '<div class="empty-state"><div class="emoji">🏬</div>Seu usuário ainda não está vinculado a nenhuma loja.<br>Peça para a Diretoria marcar a sua loja em <b>Funcionários → Lojas vinculadas</b>.</div>';
     return;
@@ -691,11 +697,24 @@ function renderRoute() {
 function storeRestricted() { var r = currentRole(); return !!currentEmployeeId && r !== "Diretoria" && r !== "Gerência"; }
 function allowedStoreIds() {
   if (!storeRestricted()) return storeOrder.slice();
-  if (currentRole() === "Operador de Estoque") return storeOrder.filter(function(s){ return stores[s] && stores[s].isCentral; });
-  var e = employees[currentEmployeeId] || {}, mine = e.storeIds || [];
-  return storeOrder.filter(function(s){ return mine.indexOf(s) !== -1; });
+  var e = employees[currentEmployeeId] || {}, mine = e.storeIds || [], isStock = currentRole() === "Operador de Estoque";
+  // Operador de Estoque: sempre o Estoque Central + as lojas vinculadas no cadastro
+  return storeOrder.filter(function(s){ return mine.indexOf(s) !== -1 || (isStock && stores[s] && stores[s].isCentral); });
 }
 function storeAllowed(sid) { return allowedStoreIds().indexOf(sid) !== -1; }
+// Operador de Estoque vendo uma loja (não o Central): somente consulta
+function viewOnlyStore() { return currentRole() === "Operador de Estoque" && !!stores[currentStoreId] && !stores[currentStoreId].isCentral; }
+function syncViewOnly() {
+  var on = viewOnlyStore() && ROUTES[currentRoute] && ROUTES[currentRoute].storeScoped;
+  document.body.classList.toggle("view-only-store", !!on);
+  var bar = document.getElementById("viewOnlyBar");
+  if (!bar) {
+    bar = document.createElement("div"); bar.id = "viewOnlyBar";
+    content.parentNode.insertBefore(bar, content);
+  }
+  bar.style.display = on ? "" : "none";
+  if (on) bar.innerHTML = '👁️ <b>Somente consulta</b> — você está vendo <b>' + esc(stores[currentStoreId].name) + '</b>. Para lançar, selecione o <b>Estoque Central</b>.';
+}
 // devolve true se a loja atual precisou ser trocada
 function renderStoreSelect() {
   var list = allowedStoreIds(), changed = false;
@@ -1514,6 +1533,7 @@ function renderEstoqueHub() {
       return ks.length ? (low ? '<span class="tc-warn">' + low + ' abaixo da necessidade</span>' : ks.length + ' produtos · tudo em dia') : 'nenhuma necessidade definida';
     })()) +
     card("pdf", "📄", "Resumo em PDF", "Saldo de todos os produtos desta loja para enviar.", "") + '</div>';
+  if (viewOnlyStore()) { content.innerHTML = html; content.querySelectorAll("[data-topic]").forEach(function(b){ b.addEventListener("click", function(){ openEstoqueTopic(b.getAttribute("data-topic")); }); }); return; }
   html += '<div class="topic-group tg-lancar">✍️ Lançar</div><div class="topic-grid">' +
     (canCount ? card("contagem", "📋", "Contagem de estoque", "Contagem completa da loja, por gênero.", "Última completa: " + (lastFull ? fmtDateShort(lastFull.date) : "nenhuma")) : '') +
     (canCount ? card("produzido", "🔪", "Contagem de estoque produzido", "Itens já porcionados e prontos na base.", nProd + " itens · última: " + (lastProd ? fmtDateShort(lastProd.date) : "nenhuma"), "tc-prod") : '') +
@@ -2934,7 +2954,7 @@ function openEmployeeForm(id) {
     '<div style="font-size:11.5px;color:var(--text-2);margin:-6px 0 12px 0;">🧊 Todos os funcionários podem fazer a Contagem de geladeira. A função <b>Contagem de Geladeira</b> dá acesso <b>somente</b> a esta tela.</div>' +
     '<div class="field"><label>Lojas vinculadas</label><div class="chip-group" id="eStores">' +
     storeOrder.map(function(sid){ return '<div class="chip' + (storeIds.indexOf(sid)!==-1?" selected":"") + '" data-sid="' + sid + '">' + esc(stores[sid].name) + '</div>'; }).join("") + '</div>' +
-    '<div style="font-size:11.5px;color:var(--text-2);margin-top:6px;">🔒 O funcionário só faz pedidos e lançamentos nas lojas marcadas. <b>Operador de Estoque</b> lança só no Estoque Central; <b>Gerência</b> e <b>Diretoria</b> em todas.</div></div>' +
+    '<div style="font-size:11.5px;color:var(--text-2);margin-top:6px;">🔒 O funcionário só faz pedidos e lançamentos nas lojas marcadas. <b>Operador de Estoque</b> lança só no Estoque Central e consulta as lojas marcadas; <b>Gerência</b> e <b>Diretoria</b> em todas.</div></div>' +
     (e && !readOnly ? employeeAccessHtml(e) : (e && e.login ? '<div class="sub">Usuário de acesso: <b>' + esc(e.login) + '</b></div>' : '')) +
     (readOnly ? '' : '<button class="btn btn-primary" id="bSave">Salvar</button>' +
       (e?'<button class="btn btn-secondary" id="bDel">Excluir</button>':'')) +
@@ -6290,7 +6310,7 @@ init();
 <div id="updBar" style="display:none;position:fixed;left:12px;right:12px;bottom:14px;z-index:9999;background:#1f6f43;color:#fff;border-radius:14px;padding:13px 16px;font:600 14.5px/1.3 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;text-align:center;">🔄 Saiu uma versão nova do sistema. <u>Toque aqui para atualizar</u></div>
 <script>
 (function(){
-  var APP_BUILD = "20261017182004";
+  var APP_BUILD = "20261022140528";
   var bar = document.getElementById("updBar"), checking = false;
   bar.addEventListener("click", function(){ location.reload(); });
   function check() {
