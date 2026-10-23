@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261022140729">
+<meta name="app-build" content="20261023180033">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -383,6 +383,11 @@
 .view-only-store .actions-3, .view-only-store #pdNew, .view-only-store #bFulfill, .view-only-store #bTopicStart,
 .view-only-store #fgEditList, .view-only-store #bOdSuggest, .view-only-store #ndOrder { display:none !important; }
 .view-only-store .fgInp, .view-only-store #fgNotes { pointer-events:none; opacity:.65; }
+.cst-mode { display:flex; gap:6px; margin:0 0 12px 0; }
+.cst-mode button { flex:1; padding:9px 8px; border-radius:10px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-size:13.5px; font-weight:600; cursor:pointer; }
+.cst-mode button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.cst-store { cursor:pointer; } .cst-pills { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+.cst-open { font-size:12px; color:var(--accent); font-weight:600; margin-top:8px; }
 </style>
 </head>
 <body class="locked">
@@ -443,7 +448,7 @@ var scopedStock = {};      // productId -> qty doc
 var scopedLots = [];
 var scopedMovements = [];
 var scopedPurchases = [];
-var scopedCosts = [];
+var scopedCosts = [], scopedCostsStore = null;
 var scopedSales = [];
 var scopedTasks = {};      // id -> task
 var scopedShipmentsOrigin = [];   // shipments sent FROM currentStoreId (central)
@@ -4139,14 +4144,65 @@ function saveCostSubs(groups) {
   var ref = db.doc("meta/costSubgroups"), data = {groups: groups, updatedAt: Date.now(), updatedBy: currentEmployeeName || ""};
   return ref.get().then(function(s){ return s.exists ? ref.update(data) : ref.set(data); }).then(function(){ costSubs = groups; });
 }
+var custosAll = false, custosAllCache = {};
+function custosModeBar() {
+  if (!canManageCostSubs()) return '';
+  return '<div class="cst-mode"><button data-cmode="0" class="' + (custosAll ? '' : 'on') + '">🏬 ' + esc(stores[currentStoreId] ? stores[currentStoreId].name : 'Esta loja') + '</button>' +
+    '<button data-cmode="1" class="' + (custosAll ? 'on' : '') + '">🌐 Todas as lojas</button></div>';
+}
+function bindCustosMode() {
+  content.querySelectorAll("[data-cmode]").forEach(function(b){ b.addEventListener("click", function(){ custosAll = b.getAttribute("data-cmode") === "1"; custosAllCache = {}; renderCustos(); }); });
+}
+function renderCustosAll() {
+  var m = custosMonth, data = custosAllCache[m];
+  var head = '<div class="section-head"><h2>Custos</h2><div style="display:flex;gap:12px;align-items:center;">' +
+    '<button class="link-btn" id="bCostSubs">⚙ Subgrupos</button><button class="btn btn-primary btn-sm" id="bAdd">+ Novo</button></div></div>' +
+    custosModeBar() + '<div class="field"><label>Mês</label><input type="month" id="custMonth" value="' + m + '"></div>';
+  function bind() {
+    bindCustosMode();
+    document.getElementById("bAdd").addEventListener("click", function(){ openCostForm(); });
+    document.getElementById("bCostSubs").addEventListener("click", openCostSubgroups);
+    document.getElementById("custMonth").addEventListener("change", function(e){ custosMonth = e.target.value; renderCustos(); });
+    content.querySelectorAll("[data-cstore]").forEach(function(r){ r.addEventListener("click", function(){
+      var sid = r.getAttribute("data-cstore"); custosAll = false;
+      if (sid !== currentStoreId) { storeSelect.value = sid; storeSelect.dispatchEvent(new Event("change")); } else renderCustos();
+    }); });
+  }
+  if (!data) {
+    content.innerHTML = head + '<div class="loading-msg">Carregando custos de todas as lojas…</div>'; bind();
+    db.collection("costs").where("month", "==", m).get().then(function(s){
+      custosAllCache[m] = s.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+      if (currentRoute === "custos" && custosAll && custosMonth === m) renderCustos();
+    }).catch(function(err){ showToast("Erro ao carregar custos: " + errMsg(err)); });
+    return;
+  }
+  var by = {}, total = 0;
+  data.forEach(function(x){ (by[x.storeId] = by[x.storeId] || []).push(x); total += x.amount || 0; });
+  var html = head + '<div class="stat-grid"><div class="stat-box wide"><div class="num">' + fmtMoney(total) + '</div><div class="label">total de custos no mês · todas as lojas (' + data.length + ' lançamentos)</div></div></div>';
+  var ids = storeOrder.filter(function(s){ return by[s]; }).concat(Object.keys(by).filter(function(s){ return storeOrder.indexOf(s) === -1; }));
+  if (!ids.length) html += '<div class="empty-state"><div class="emoji">💰</div>Nenhum custo lançado neste mês.</div>';
+  ids.forEach(function(sid){
+    var list = by[sid], st = list.reduce(function(a,x){ return a + (x.amount||0); }, 0);
+    var nm = stores[sid] ? stores[sid].name : (list[0].storeName || "Loja removida");
+    html += '<div class="cst-pillar cst-store" data-cstore="' + esc(sid) + '"><div class="cst-ph"><span><b>🏬 ' + esc(nm) + '</b> <small>' + list.length + ' lançamento' + (list.length === 1 ? '' : 's') + '</small></span><span><b>' + fmtMoney(st) + '</b><small>' + (total ? Math.round(st / total * 100) : 0) + '%</small></span></div>' +
+      '<div class="cst-bar"><i style="width:' + (total ? (st / total * 100).toFixed(1) : 0) + '%;"></i></div>' +
+      '<div class="cst-pills">' + PILLARS.map(function(pl){
+        var v = list.filter(function(x){ return (x.pillar || "outro") === pl.v; }).reduce(function(a,x){ return a + (x.amount||0); }, 0);
+        return v ? '<span class="pill pill-' + pl.v + '">' + pl.l + ' ' + fmtMoney(v) + '</span>' : '';
+      }).join("") + '</div><div class="cst-open">Toque para ver os lançamentos ›</div></div>';
+  });
+  content.innerHTML = html; bind();
+}
 function renderCustos() {
+  if (custosAll && canManageCostSubs()) { renderCustosAll(); return; }
   if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
+  if (scopedCostsStore !== currentStoreId) { content.innerHTML = '<div class="loading-msg">Carregando custos…</div>'; return; }
   if (!costSubs) { content.innerHTML = '<div class="loading-msg">Carregando custos…</div>'; loadCostSubs(function(){ if (currentRoute === "custos") renderCustos(); }); return; }
   var filtered = scopedCosts.filter(function(c){ return c.month===custosMonth; });
   var total = filtered.reduce(function(s,c){return s+(c.amount||0);},0);
   var html = '<div class="section-head"><h2>Custos</h2><div style="display:flex;gap:12px;align-items:center;">' +
     (canManageCostSubs() ? '<button class="link-btn" id="bCostSubs">⚙ Subgrupos</button>' : '') +
-    '<button class="btn btn-primary btn-sm" id="bAdd">+ Novo</button></div></div>';
+    '<button class="btn btn-primary btn-sm" id="bAdd">+ Novo</button></div></div>' + custosModeBar();
   html += '<div class="field"><label>Mês</label><input type="month" id="custMonth" value="' + custosMonth + '"></div>';
   html += '<div class="stat-grid"><div class="stat-box wide"><div class="num">' + fmtMoney(total) + '</div><div class="label">total de custos no mês · ' + esc(stores[currentStoreId] ? stores[currentStoreId].name : "") + '</div></div></div>';
   if (!filtered.length) {
@@ -4177,6 +4233,7 @@ function renderCustos() {
   var bs = document.getElementById("bCostSubs"); if (bs) bs.addEventListener("click", openCostSubgroups);
   document.getElementById("custMonth").addEventListener("change", function(e){ custosMonth = e.target.value; subscribeScoped("custos"); });
   content.querySelectorAll("[data-cst]").forEach(function(r){ r.addEventListener("click", function(){ var k = r.getAttribute("data-cst"); costOpen[k] = !costOpen[k]; renderCustos(); }); });
+  bindCustosMode();
 }
 function openCostForm(pre) {
   if (!requireOperator()) return;
@@ -4185,7 +4242,10 @@ function openCostForm(pre) {
   function subOpts(pl, sel) {
     return '<option value="">— Sem subgrupo —</option>' + costSubgroups(pl).map(function(s){ return '<option' + (s === sel ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join("");
   }
+  var cStoreList = canManageCostSubs() ? storeOrder.slice() : [currentStoreId];
   var html = '<h2>Novo custo</h2>' +
+    '<div class="field"><label>Loja do custo</label><select id="cStore"' + (cStoreList.length <= 1 ? ' disabled' : '') + '>' +
+      cStoreList.map(function(sid){ return '<option value="' + sid + '"' + (sid === currentStoreId ? ' selected' : '') + '>' + esc(stores[sid] ? stores[sid].name : sid) + '</option>'; }).join("") + '</select></div>' +
     '<div class="row2"><div class="field"><label>Pilar</label><select id="cPillar">' + PILLARS.map(function(pl){return '<option value="'+pl.v+'"' + (pl.v === pillar ? ' selected' : '') + '>'+pl.l+'</option>';}).join("") + '</select></div>' +
     '<div class="field"><label>Subgrupo</label><select id="cSub">' + subOpts(pillar, pre.subgroup) + '</select></div></div>' +
     (canManageCostSubs() ? '<button class="link-btn" id="cNewSub" type="button" style="margin:-6px 0 10px 0;">+ Cadastrar novo subgrupo neste pilar</button>' : '') +
@@ -4210,13 +4270,14 @@ function openCostForm(pre) {
   document.getElementById("bSave").addEventListener("click", function(){
     var amount = parseFloat(document.getElementById("cAmount").value);
     if (!amount || amount<=0) { showToast("Informe um valor válido"); return; }
-    var storeName = stores[currentStoreId] ? stores[currentStoreId].name : "";
+    var cSid = document.getElementById("cStore").value || currentStoreId;
+    var storeName = stores[cSid] ? stores[cSid].name : "";
     var btn = document.getElementById("bSave"); btn.disabled=true; btn.textContent="Salvando…";
     db.collection("costs").add({
-      storeId:currentStoreId, storeName:storeName, pillar:pSel.value, subgroup:sSel.value || "",
+      storeId:cSid, storeName:storeName, pillar:pSel.value, subgroup:sSel.value || "",
       label:document.getElementById("cLabel").value.trim(), amount:amount, month:document.getElementById("cMonth").value,
       employeeId:currentEmployeeId, employeeName:currentEmployeeName, createdAt:Date.now()
-    }).then(function(){ networkCmvCache = {}; closeSheet(); showToast("Custo lançado"); })
+    }).then(function(){ networkCmvCache = {}; custosAllCache = {}; closeSheet(); showToast("Custo lançado em " + storeName); if (currentRoute === "custos") renderCustos(); })
       .catch(function(){ showToast("Erro ao salvar"); btn.disabled=false; btn.textContent="Salvar"; });
   });
 }
@@ -5939,8 +6000,10 @@ function subscribeScoped(route) {
       if (currentRoute==="compras") renderRoute();
     }, function(err){ showToast("Erro ao carregar pedidos: " + errMsg(err)); }));
   } else if (route === "custos") {
+    scopedCostsStore = null;
     scopedUnsubs.push(db.collection("costs").where("storeId","==",storeId).onSnapshot(function(snap){
       scopedCosts = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+      scopedCostsStore = storeId;
       if (currentRoute==="custos") renderRoute();
     }));
   } else if (route === "vendas") {
@@ -5954,6 +6017,7 @@ function subscribeScoped(route) {
     }));
     scopedUnsubs.push(db.collection("costs").where("storeId","==",storeId).onSnapshot(function(snap){
       scopedCosts = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+      scopedCostsStore = storeId;
       if (currentRoute==="vendas") renderRoute();
     }));
     scopedUnsubs.push(db.collection("shipments").where("destStoreId","==",storeId).orderBy("sentAt","desc").limit(400).onSnapshot(function(snap){
@@ -6318,7 +6382,7 @@ init();
 <div id="updBar" style="display:none;position:fixed;left:12px;right:12px;bottom:14px;z-index:9999;background:#1f6f43;color:#fff;border-radius:14px;padding:13px 16px;font:600 14.5px/1.3 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;text-align:center;">🔄 Saiu uma versão nova do sistema. <u>Toque aqui para atualizar</u></div>
 <script>
 (function(){
-  var APP_BUILD = "20261022140729";
+  var APP_BUILD = "20261023180033";
   var bar = document.getElementById("updBar"), checking = false;
   bar.addEventListener("click", function(){ location.reload(); });
   function check() {
