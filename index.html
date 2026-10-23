@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261023180033">
+<meta name="app-build" content="20261023182950">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -388,6 +388,20 @@
 .cst-mode button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
 .cst-store { cursor:pointer; } .cst-pills { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
 .cst-open { font-size:12px; color:var(--accent); font-weight:600; margin-top:8px; }
+.vg-table { border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--surface); }
+.vg-row { display:grid; grid-template-columns: 1.6fr 1.2fr 1.1fr .8fr .8fr; gap:6px; padding:10px; border-bottom:1px solid var(--border); font-size:12.5px; align-items:center; }
+.vg-row > span:not(:first-child) { text-align:right; white-space:nowrap; }
+.vg-row small { display:block; color:var(--accent); font-size:11px; font-weight:600; margin-top:2px; }
+.vg-row[data-vstore] { cursor:pointer; } .vg-row[data-vstore]:active { background:var(--surface-2); }
+.vg-h { background:var(--surface-2); font-weight:700; font-size:11.5px; color:var(--text-2); }
+.vg-f { background:var(--surface-2); border-bottom:0; }
+.wd-chart { display:flex; flex-direction:column; gap:6px; }
+.wd-row { display:grid; grid-template-columns: 34px 1fr 92px; gap:8px; align-items:center; font-size:12.5px; }
+.wd-row b { text-align:right; } .wd-bar { background:var(--surface-2); border-radius:6px; height:14px; overflow:hidden; }
+.wd-bar i { display:block; height:100%; background:var(--accent); border-radius:6px; }
+.cst-mode { display:flex; gap:6px; margin:0 0 12px 0; }
+.cst-mode button { flex:1; padding:9px 8px; border-radius:10px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-size:13.5px; font-weight:600; cursor:pointer; }
+.cst-mode button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
 </style>
 </head>
 <body class="locked">
@@ -1527,11 +1541,12 @@ function renderEstoqueHub() {
     return '<button class="topic-card' + (cls ? ' ' + cls : '') + '" data-topic="' + v + '"><span class="tc-ic">' + ic + '</span><span class="tc-body"><b>' + title + '</b><small>' + desc + '</small>' +
       (stat ? '<em>' + stat + '</em>' : '') + '</span><span class="tc-go">›</span></button>';
   }
-  var html = '<div class="topic-intro">📦 Estoque · <b>' + esc(sname) + '</b><span>Escolha o que você quer fazer.</span></div>';
+  var html = (ALL_STOCK_ROLES.indexOf(role) !== -1 ? '<div class="cst-mode"><button class="on">🏬 ' + esc(sname) + '</button><button data-topic="todas">🌐 Todas as lojas</button></div>' : '') +
+    '<div class="topic-intro">📦 Estoque · <b>' + esc(sname) + '</b><span>Escolha o que você quer fazer.</span></div>';
   html += '<div class="topic-group tg-consultar">🔎 Consultar</div><div class="topic-grid">' +
     card("saldo", "📦", "Saldo do estoque", "Quanto há de cada produto. Entrada, saída e perda.", ids.length + " produtos · " + withStock + " com estoque" + (low ? ' · <span class="tc-warn">' + low + ' abaixo do mínimo</span>' : '')) +
     card("movs", "📒", "Lançamentos por data", "Entradas, saídas, perdas e ajustes por dia, semana ou mês.", "") +
-    (ALL_STOCK_ROLES.indexOf(role) !== -1 ? card("todas", "🏬", "Estoque de todas as lojas", "Tabela com uma coluna por loja.", "") : '') +
+    (ALL_STOCK_ROLES.indexOf(role) !== -1 ? card("todas", "🌐", "Todas as lojas · estoque global", "Saldo de cada produto em cada loja, total da rede e valor em R$.", "") : '') +
     card("necessidade", "📊", "Necessidade da loja", "Quanto a loja precisa por dia e a sugestão do que pedir.", (function(){
       var it = needsCache[currentStoreId]; if (!it) { loadNeeds(currentStoreId, function(){ if (currentRoute === "estoque" && !estoqueView && !estoqueMovMode && !estoqueAllMode) renderEstoqueHub(); }); return "carregando…"; }
       var ks = Object.keys(it).filter(function(pid){ return products[pid] && productInStore(pid, currentStoreId); }), low = ks.filter(function(pid){ return needSuggestion(pid, it[pid]) > 0; }).length;
@@ -2132,12 +2147,19 @@ function renderAllStoresStock() {
   var sids = storeOrder.filter(function(sid){ return stores[sid]; });
   var html = '<div class="section-head"><button class="link-btn" id="bAllBack">← Tópicos do estoque</button>' +
     '<div style="display:flex;gap:14px;"><button class="link-btn" id="bAllPdf">📄 PDF</button><button class="link-btn" id="bAllReload">🔄 Atualizar</button></div></div>' +
-    '<h2 style="font-size:18px;margin:0 0 4px 0;">🏬 Estoque de todas as lojas</h2>' +
+    '<div class="cst-mode"><button id="bAllThis">🏬 ' + esc(stores[currentStoreId] ? stores[currentStoreId].name : 'Esta loja') + '</button><button class="on">🌐 Todas as lojas</button></div>' +
+    '<h2 style="font-size:18px;margin:0 0 4px 0;">🌐 Estoque global · todas as lojas</h2>' +
     '<div style="font-size:12.5px;color:var(--text-2);margin-bottom:12px;">Saldo informado por cada loja (lançamentos, contagens e recebimentos).</div>';
   if (!allStock) {
     content.innerHTML = html + '<div class="loading-msg">Carregando estoque das lojas…</div>';
     bindAllStores(); return;
   }
+  (function(){
+    var val = {}, gv = 0;
+    Object.keys(allStock).forEach(function(pid){ var p = products[pid]; if (!p) return; Object.keys(allStock[pid]).forEach(function(s){ var v = (allStock[pid][s].quantity || 0) * (p.cost || 0); if (v > 0) { val[s] = (val[s] || 0) + v; gv += v; } }); });
+    html += '<div class="stat-grid"><div class="stat-box wide"><div class="num">' + fmtMoney(gv) + '</div><div class="label">valor do estoque global (saldo × custo do produto)</div></div>' +
+      sids.filter(function(s){ return val[s]; }).map(function(s){ return '<div class="stat-box"><div class="num" style="font-size:17px;">' + fmtMoney(val[s]) + '</div><div class="label">' + esc(stores[s].name) + '</div></div>'; }).join("") + '</div>';
+  })();
   html += '<div class="searchbar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>' +
     '<input id="allSearch" type="text" placeholder="Buscar produto..." value="' + esc(searchTerm) + '"></div>';
   var catIds = categoryOrder.filter(function(cid){ return productOrder.some(function(pid){ return products[pid].categoryId === cid; }); });
@@ -2193,6 +2215,7 @@ function renderAllStoresStock() {
 }
 function bindAllStores() {
   var b = document.getElementById("bAllBack"); if (b) b.addEventListener("click", exitAllStores);
+  var bt = document.getElementById("bAllThis"); if (bt) bt.addEventListener("click", exitAllStores);
   var bp = document.getElementById("bAllPdf"); if (bp) bp.addEventListener("click", printAllStores);
   var r = document.getElementById("bAllReload"); if (r) r.addEventListener("click", function(){ allStock = null; renderAllStoresStock(); loadAllStock(); });
   var s = document.getElementById("allSearch");
@@ -4365,10 +4388,18 @@ function fetchNetworkCmv(month) {
     db.collection("sales").where("date", ">=", start).where("date", "<=", end).get(),
     db.collection("purchases").where("date", ">=", start).where("date", "<=", end).get(),
     db.collection("counts").get(),
-    db.collection("costs").where("month", "==", month).get()
+    db.collection("costs").where("month", "==", month).get(),
+    (function(){ var p = month.split("-"), a = new Date(+p[0], +p[1]-1, 1).getTime(), b = new Date(+p[0], +p[1], 1).getTime();
+      return db.collection("shipments").where("sentAt", ">=", a).where("sentAt", "<", b).get(); })()
   ]).then(function(r){
-    var sales = 0, salesByStore = {};
-    r[0].docs.forEach(function(d){ var s = d.data(); sales += s.amount||0; salesByStore[s.storeId] = (salesByStore[s.storeId]||0) + (s.amount||0); });
+    var sales = 0, salesByStore = {}, salesDocs = {}, per = {};
+    function ps(sid){ return per[sid] = per[sid] || {sales:0, enviado:0, devolvido:0, merc:0, mao:0}; }
+    r[0].docs.forEach(function(d){ var s = Object.assign({id:d.id}, d.data()); sales += s.amount||0; salesByStore[s.storeId] = (salesByStore[s.storeId]||0) + (s.amount||0);
+      ps(s.storeId).sales += s.amount||0; (salesDocs[s.storeId] = salesDocs[s.storeId] || []).push(s); });
+    r[3].docs.forEach(function(d){ var x = d.data(); if (x.pillar==="mercadoria") ps(x.storeId).merc += x.amount||0; if (x.pillar==="mao_de_obra") ps(x.storeId).mao += x.amount||0; });
+    r[4].docs.forEach(function(d){ var s = d.data(); if (s.status === "cancelado") return;
+      if (s.kind === "devolucao") ps(s.originStoreId).devolvido += shipmentValue(s); else ps(s.destStoreId).enviado += shipmentValue(s); });
+    Object.keys(per).forEach(function(sid){ var x = per[sid]; x.cmv = x.enviado - x.devolvido + x.merc; x.cmvPct = x.sales > 0 ? x.cmv / x.sales * 100 : null; x.cmoPct = x.sales > 0 ? x.mao / x.sales * 100 : null; });
     var compras = 0;
     r[1].docs.forEach(function(d){ compras += d.data().totalCost||0; });
     var counts = r[2].docs.map(function(d){ return Object.assign({id:d.id}, d.data()); })
@@ -4382,7 +4413,7 @@ function fetchNetworkCmv(month) {
     var mao = 0, comprasCustos = 0, comprasNotas = compras;
     r[3].docs.forEach(function(d){ var c = d.data(); if (c.pillar==="mao_de_obra") mao += c.amount||0; if (c.pillar==="mercadoria") comprasCustos += c.amount||0; });
     compras += comprasCustos;
-    var res = { month:month, sales:sales, salesByStore:salesByStore, compras:compras, comprasNotas:comprasNotas, comprasCustos:comprasCustos, ei:ei, ef:ef, mao:mao, loadedAt:Date.now() };
+    var res = { month:month, sales:sales, salesByStore:salesByStore, salesDocs:salesDocs, perStore:per, compras:compras, comprasNotas:comprasNotas, comprasCustos:comprasCustos, ei:ei, ef:ef, mao:mao, loadedAt:Date.now() };
     if (ei && ef) {
       res.cmv = (ei.totalValue||0) + compras - (ef.totalValue||0);
       res.cmvPct = sales>0 ? res.cmv/sales*100 : 0;
@@ -4421,7 +4452,6 @@ function renderVendas() {
       '<div class="stat-box"><div class="num">− ' + fmtMoney(sc.devolvido) + '</div><div class="label">devoluções ao central (' + sc.returns + ')</div></div>' +
       '<div class="stat-box"><div class="num">+ ' + fmtMoney(sc.comprasDiretas) + '</div><div class="label">compras diretas · Custos › Mercadoria (' + sc.comprasN + ')</div></div>' +
       '<div class="stat-box"><div class="num">' + fmtMoney(sc.cmv) + '</div><div class="label">CMV da loja R$</div></div>' +
-      '<div class="stat-box"><div class="num">' + fmtMoney(sc.cmv) + '</div><div class="label">CMV R$</div></div>' +
       '<div class="stat-box"><div class="num">' + sc.cmoPct.toFixed(1) + '%</div><div class="label">CMO %</div></div>' +
     '</div>' +
     '<div class="sub" style="font-size:12px;color:var(--text-2);margin-bottom:14px;">Fórmula: (mercadorias enviadas pelo estoque central − devoluções + compras diretas lançadas em Custos › Mercadoria) ÷ vendas lançadas. Envios pelo custo do produto no momento do envio.</div>';
@@ -4436,6 +4466,11 @@ function renderVendas() {
     html += '<div class="chart-wrap"><div class="chart-title">Vendas — últimos 6 meses</div>' + barChart(last6) + '</div>';
 
     var monthSales = scopedSales.filter(function(s){return (s.date||"").indexOf(month)===0;});
+    if (monthSales.length) {
+      var dmap = {}; monthSales.forEach(function(s){ dmap[s.date] = (dmap[s.date] || 0) + (s.amount || 0); });
+      html += '<div class="chart-wrap"><div class="chart-title">📊 Venda por dia <small style="font-weight:500;color:var(--text-2);">· em verde os 3 dias de maior fluxo</small></div>' + dailyChart(dmap, month) + '</div>' +
+        '<div class="chart-wrap"><div class="chart-title">📅 Média por dia da semana</div>' + weekdayChart(monthSales) + '</div>';
+    }
     if (monthSales.length===0) {
       html += '<div class="empty-state"><div class="emoji">📈</div>Nenhuma venda lançada neste mês.</div>';
     } else {
@@ -4443,7 +4478,7 @@ function renderVendas() {
         html += '<div class="move-item"><div class="move-icon entrada">💵</div><div class="move-body">' +
           '<div class="move-title">Venda do dia' + (s.source === "saipos" ? ' <span class="pdv-tag">Saipos</span>' : '') + '</div><div class="move-sub">' + fmtDateShort(s.date) +
           (s.source === "saipos" ? ' · ' + (s.salesCount || 0) + ' venda(s) · sem taxa de serviço' : (s.employeeName ? ' · ' + esc(s.employeeName) : '')) + '</div></div>' +
-          '<div class="move-qty entrada">' + fmtMoney(s.amount) + '</div></div>';
+          '<div class="move-qty entrada">' + fmtMoney(s.amount) + '</div>' + (currentRole() === "Diretoria" ? '<button class="link-btn" data-editsale="' + s.id + '" style="margin-left:8px;" title="Editar">✏️</button>' : '') + '</div>';
       });
     }
   } else {
@@ -4477,11 +4512,18 @@ function renderVendas() {
         (nc.ei ? '' : '<b>antes de ' + fmtDateShort(month+"-01") + '</b> (estoque inicial)') + (!nc.ei && !nc.ef ? ' e outra ' : '') +
         (nc.ef ? '' : '<b>dentro deste mês</b> (estoque final)') + '. Faça em Estoque → Estoque Central → "Contagem de estoque".</div>';
     }
-    html += '<div class="chart-title" style="margin-top:10px;">Vendas por loja no mês</div>';
+    html += '<div class="chart-title" style="margin-top:10px;">🌐 CMV global por loja <small style="font-weight:500;color:var(--text-2);">· toque na loja para ver a venda por dia</small></div>';
+    html += '<div class="vg-table"><div class="vg-row vg-h"><span>Loja</span><span>Vendas</span><span>CMV R$</span><span>CMV %</span><span>CMO %</span></div>';
+    var tot = {sales:0, cmv:0, mao:0};
     storeOrder.filter(function(id){ return !stores[id].isCentral; }).forEach(function(id){
-      html += '<div class="move-item"><div class="move-icon entrada">🏬</div><div class="move-body"><div class="move-title">' + esc(stores[id].name) + '</div></div>' +
-        '<div class="move-qty entrada">' + fmtMoney(nc.salesByStore[id]||0) + '</div></div>';
+      var x = (nc.perStore || {})[id] || {sales:0, cmv:0, mao:0, cmvPct:null, cmoPct:null};
+      tot.sales += x.sales; tot.cmv += x.cmv || 0; tot.mao += x.mao || 0;
+      function pct(v, lim){ return v === null || v === undefined ? '<span style="color:var(--text-2)">—</span>' : '<b style="color:' + (v > lim ? 'var(--red)' : 'var(--green)') + '">' + v.toFixed(1) + '%</b>'; }
+      html += '<div class="vg-row" data-vstore="' + id + '"><span><b>🏬 ' + esc(stores[id].name) + '</b><small>' + ((nc.salesDocs || {})[id] || []).length + ' dia(s) lançado(s) ›</small></span>' +
+        '<span>' + fmtMoney(x.sales) + '</span><span>' + fmtMoney(x.cmv || 0) + '</span><span>' + pct(x.cmvPct, 35) + '</span><span>' + pct(x.cmoPct, 30) + '</span></div>';
     });
+    html += '<div class="vg-row vg-f"><span><b>Total da rede</b></span><span><b>' + fmtMoney(tot.sales) + '</b></span><span><b>' + fmtMoney(tot.cmv) + '</b></span><span><b>' + (tot.sales ? (tot.cmv / tot.sales * 100).toFixed(1) + '%' : '—') + '</b></span><span><b>' + (tot.sales ? (tot.mao / tot.sales * 100).toFixed(1) + '%' : '—') + '</b></span></div></div>';
+    html += '<div class="sub" style="font-size:11.5px;color:var(--text-2);margin:6px 0 12px;">CMV de cada loja = enviado pelo central − devoluções + Custos › Mercadoria, ÷ vendas da loja. Acima de 35% fica vermelho.</div>';
     html += '<button class="link-btn" id="bRecalc">🔄 Recalcular</button>';
   }
   content.innerHTML = html;
@@ -4496,6 +4538,94 @@ function bindVendas(isCentralStore) {
   });
   var rc = document.getElementById("bRecalc");
   if (rc) rc.addEventListener("click", function(){ delete networkCmvCache[custosMonth]; renderVendas(); });
+  content.querySelectorAll("[data-vstore]").forEach(function(r){ r.addEventListener("click", function(){ openStoreSalesDetail(r.getAttribute("data-vstore"), custosMonth); }); });
+  content.querySelectorAll("[data-editsale]").forEach(function(b){ b.addEventListener("click", function(ev){ ev.stopPropagation();
+    var s = scopedSales.filter(function(x){ return x.id === b.getAttribute("data-editsale"); })[0]; if (s) openSaleEdit(s); }); });
+}
+var WEEKDAYS = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+function dailyChart(days, month) {
+  // days: {"YYYY-MM-DD": valor}
+  var last = parseInt(monthEnd(month).slice(-2), 10), vals = [], max = 1;
+  for (var d = 1; d <= last; d++) { var k = month + "-" + String(d).padStart(2, "0"), v = days[k] || 0; vals.push({d:d, k:k, v:v}); if (v > max) max = v; }
+  var top = vals.filter(function(x){ return x.v > 0; }).sort(function(a,b){ return b.v - a.v; }).slice(0, 3).map(function(x){ return x.k; });
+  var w = 330, h = 120, bw = w / last;
+  var svg = '<svg viewBox="0 0 ' + w + ' ' + (h + 18) + '" width="100%" role="img" aria-label="Venda por dia">';
+  vals.forEach(function(x, i){
+    var bh = x.v / max * h, wd = new Date(month + "-" + String(x.d).padStart(2,"0") + "T12:00:00").getDay();
+    svg += '<rect x="' + (i * bw + 1).toFixed(1) + '" y="' + (h - bh).toFixed(1) + '" width="' + Math.max(bw - 2, 1).toFixed(1) + '" height="' + Math.max(bh, x.v ? 2 : 0).toFixed(1) + '" rx="2" fill="' + (top.indexOf(x.k) !== -1 ? 'var(--green)' : 'var(--accent)') + '"' + (wd === 0 || wd === 6 ? ' opacity=".8"' : ' opacity=".55"') + '><title>' + fmtDateShort(x.k) + ' (' + WEEKDAYS[wd] + '): ' + fmtMoney(x.v) + '</title></rect>';
+    if (x.d === 1 || x.d % 5 === 0) svg += '<text x="' + (i * bw + bw / 2).toFixed(1) + '" y="' + (h + 13) + '" font-size="9" fill="var(--text-2)" text-anchor="middle">' + x.d + '</text>';
+  });
+  return svg + '</svg>';
+}
+function weekdayChart(list) {
+  var sum = [0,0,0,0,0,0,0], n = [0,0,0,0,0,0,0];
+  list.forEach(function(s){ var wd = new Date(s.date + "T12:00:00").getDay(); sum[wd] += s.amount || 0; n[wd]++; });
+  var avg = sum.map(function(v, i){ return n[i] ? v / n[i] : 0; }), max = Math.max.apply(null, avg.concat([1]));
+  var best = avg.indexOf(Math.max.apply(null, avg));
+  var h = '<div class="wd-chart">';
+  [1,2,3,4,5,6,0].forEach(function(i){
+    h += '<div class="wd-row"><span>' + WEEKDAYS[i] + '</span><div class="wd-bar"><i style="width:' + (avg[i] / max * 100).toFixed(1) + '%;' + (i === best && avg[i] ? 'background:var(--green);' : '') + '"></i></div><b>' + (n[i] ? fmtMoney(avg[i]) : '—') + '</b></div>';
+  });
+  return h + '</div>';
+}
+function openStoreSalesDetail(sid, month) {
+  var nc = networkCmvCache[month] || {}, list = ((nc.salesDocs || {})[sid] || []).slice().sort(function(a,b){ return (b.date||"").localeCompare(a.date||""); });
+  var days = {}; list.forEach(function(s){ days[s.date] = (days[s.date] || 0) + (s.amount || 0); });
+  var total = list.reduce(function(a,s){ return a + (s.amount||0); }, 0), nDays = Object.keys(days).length;
+  var best = Object.keys(days).sort(function(a,b){ return days[b] - days[a]; }).slice(0, 3);
+  var isDir = currentRole() === "Diretoria";
+  var h = '<h2>🏬 ' + esc(stores[sid] ? stores[sid].name : "Loja") + ' · vendas por dia</h2><div class="sub">' + esc(month.split("-").reverse().join("/")) + '</div>' +
+    '<div class="stat-grid"><div class="stat-box"><div class="num">' + fmtMoney(total) + '</div><div class="label">vendas no mês</div></div>' +
+    '<div class="stat-box"><div class="num">' + fmtMoney(nDays ? total / nDays : 0) + '</div><div class="label">média por dia (' + nDays + ' dias)</div></div></div>';
+  if (!list.length) {
+    h += '<div class="empty-state"><div class="emoji">📈</div>Nenhuma venda lançada neste mês.</div>';
+  } else {
+    h += '<div class="chart-wrap"><div class="chart-title">📊 Venda por dia <small style="font-weight:500;color:var(--text-2);">· em verde os 3 dias de maior fluxo</small></div>' + dailyChart(days, month) + '</div>';
+    h += '<div class="chart-wrap"><div class="chart-title">📅 Média por dia da semana</div>' + weekdayChart(list) + '</div>';
+    h += '<div class="chart-title">🏆 Dias de maior fluxo</div>' + best.map(function(k, i){
+      return '<div class="item-row" style="display:flex;justify-content:space-between;"><span>' + ["🥇","🥈","🥉"][i] + ' ' + fmtDateShort(k) + ' (' + WEEKDAYS[new Date(k + "T12:00:00").getDay()] + ')</span><b>' + fmtMoney(days[k]) + '</b></div>';
+    }).join("");
+    h += '<div class="chart-title" style="margin-top:12px;">Todos os dias</div>' + list.map(function(s){
+      return '<div class="move-item"><div class="move-icon entrada">💵</div><div class="move-body"><div class="move-title">' + fmtDateShort(s.date) + ' · ' + WEEKDAYS[new Date(s.date + "T12:00:00").getDay()] +
+        (s.source === "saipos" ? ' <span class="pdv-tag">Saipos</span>' : '') + '</div><div class="move-sub">' + esc(s.employeeName || "") + '</div></div>' +
+        '<div class="move-qty entrada">' + fmtMoney(s.amount) + '</div>' + (isDir ? '<button class="link-btn" data-dsale="' + s.id + '" style="margin-left:8px;">✏️</button>' : '') + '</div>';
+    }).join("");
+  }
+  h += '<button class="btn btn-secondary" id="bSdClose">Fechar</button>';
+  openSheet(h);
+  document.getElementById("bSdClose").addEventListener("click", closeSheet);
+  sheet.querySelectorAll("[data-dsale]").forEach(function(b){ b.addEventListener("click", function(){
+    var s = list.filter(function(x){ return x.id === b.getAttribute("data-dsale"); })[0]; if (s) openSaleEdit(s, function(){ openStoreSalesDetail(sid, month); });
+  }); });
+}
+// Diretoria: editar ou excluir uma venda lançada
+function openSaleEdit(s, after) {
+  if (currentRole() !== "Diretoria") { showToast("Somente a Diretoria pode editar vendas"); return; }
+  var h = '<h2>✏️ Editar venda</h2><div class="sub">' + esc(stores[s.storeId] ? stores[s.storeId].name : (s.storeName || "")) + (s.employeeName ? ' · lançada por ' + esc(s.employeeName) : '') + '</div>' +
+    (s.source === "saipos" ? '<div class="item-row" style="border-color:var(--amber);margin-bottom:10px;">⚠️ Venda vinda do Saipos. Se você alterar, a próxima sincronização pode trazer o valor do PDV de novo.</div>' : '') +
+    '<div class="row2"><div class="field"><label>Data</label><input type="date" id="seDate" value="' + esc(s.date || "") + '"></div>' +
+    '<div class="field"><label>Valor</label><input type="number" inputmode="decimal" id="seAmount" min="0" step="any" value="' + (s.amount || "") + '"></div></div>' +
+    '<button class="btn btn-primary" id="seSave">Salvar alteração</button>' +
+    '<button class="btn btn-secondary" id="seDel" style="color:var(--red);">🗑️ Excluir esta venda</button>' +
+    '<button class="btn btn-secondary" id="seCancel">Cancelar</button>';
+  openSheet(h);
+  function done(msg){ showToast(msg); if (after) after(); else closeSheet(); networkCmvCache = {}; if (currentRoute === "vendas") renderVendas(); }
+  document.getElementById("seCancel").addEventListener("click", function(){ if (after) after(); else closeSheet(); });
+  document.getElementById("seSave").addEventListener("click", function(){
+    var amount = parseFloat(document.getElementById("seAmount").value), date = document.getElementById("seDate").value;
+    if (!amount || amount <= 0 || !date) { showToast("Informe data e valor válidos"); return; }
+    this.disabled = true;
+    db.doc("sales/" + s.id).update({date: date, amount: amount, editedAt: Date.now(), editedBy: currentEmployeeName, previousAmount: s.amount, previousDate: s.date})
+      .then(function(){ s.date = date; s.amount = amount; done("Venda alterada"); })
+      .catch(function(err){ showToast("Erro: " + errMsg(err)); document.getElementById("seSave").disabled = false; });
+  });
+  document.getElementById("seDel").addEventListener("click", function(){
+    if (!confirm("Excluir a venda de " + fmtDateShort(s.date) + " (" + fmtMoney(s.amount) + ")? Não dá para desfazer.")) return;
+    db.doc("sales/" + s.id).delete().then(function(){
+      var nc = networkCmvCache[custosMonth]; if (nc && nc.salesDocs && nc.salesDocs[s.storeId]) nc.salesDocs[s.storeId] = nc.salesDocs[s.storeId].filter(function(x){ return x.id !== s.id; });
+      done("Venda excluída");
+    }).catch(function(err){ showToast("Erro: " + errMsg(err)); });
+  });
 }
 function openSaleForm() {
   if (!requireRole(["Gerência","Diretoria"])) return;
@@ -6382,7 +6512,7 @@ init();
 <div id="updBar" style="display:none;position:fixed;left:12px;right:12px;bottom:14px;z-index:9999;background:#1f6f43;color:#fff;border-radius:14px;padding:13px 16px;font:600 14.5px/1.3 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;text-align:center;">🔄 Saiu uma versão nova do sistema. <u>Toque aqui para atualizar</u></div>
 <script>
 (function(){
-  var APP_BUILD = "20261023180033";
+  var APP_BUILD = "20261023182950";
   var bar = document.getElementById("updBar"), checking = false;
   bar.addEventListener("click", function(){ location.reload(); });
   function check() {
