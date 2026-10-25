@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261025145411">
+<meta name="app-build" content="20261025150432">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -405,6 +405,14 @@
 .mv-fixed { display:block; font-size:10.5px; font-weight:600; color:var(--amber); }
 .mv-log { font-size:11.5px; color:var(--amber); margin-top:3px; cursor:pointer; line-height:1.35; } .mv-log u { color:var(--accent); }
 .mv-fix { margin-left:8px; align-self:center; }
+.pk { position:relative; }
+.pk-in { width:100%; padding-right:34px; }
+.pk-x { position:absolute; right:6px; top:7px; border:0; background:transparent; color:var(--text-2); font-size:15px; padding:4px 7px; cursor:pointer; }
+.pk-list { display:none; position:absolute; left:0; right:0; top:100%; z-index:60; max-height:260px; overflow:auto; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.18); margin-top:3px; }
+.pk-g { position:sticky; top:0; background:var(--surface-2); font-size:11px; font-weight:800; color:var(--text-2); padding:5px 10px; }
+.pk-opt { display:flex; justify-content:space-between; gap:8px; padding:10px; border-bottom:1px solid var(--border); font-size:14px; cursor:pointer; }
+.pk-opt small { color:var(--text-2); } .pk-opt.on, .pk-opt:active { background:var(--accent-2); }
+.pk-none { padding:12px; font-size:13px; color:var(--text-2); }
 </style>
 </head>
 <body class="locked">
@@ -896,8 +904,8 @@ function cleanCloneHtml(el, extraRemove) {
 // PRODUÇÃO (porcionamento: peso bruto → filés, iscas e descarte)
 // ============================================================
 var DEFAULT_PROD_TEMPLATES = [
-  {id:"frango", name:"Filé de frango", rawProductId:"", filetProductId:"fpncvs8riaqf0kodi4mv", iscaProductId:""},
-  {id:"peixe",  name:"Filé de peixe",  rawProductId:"", filetProductId:"v02wzzyiqmjpzq7k5dgr", iscaProductId:""}
+  {id:"frango", name:"Filé de frango", rawProductId:"cd0o6nh1exsxu91v26dq", filetProductId:"fpncvs8riaqf0kodi4mv", iscaProductId:""},
+  {id:"peixe",  name:"Filé de peixe",  rawProductId:"bd9i5815ri2xek51hsys", filetProductId:"v02wzzyiqmjpzq7k5dgr", iscaProductId:""}
 ];
 var prodTemplates = null, prodData = null, prodLoading = false, prodTpl = "";
 var prodState = { period:"dia", day:"", month:"", from:"", to:"" };
@@ -1007,6 +1015,46 @@ function bindProducao() {
   on("pdFrom", "change", function(e){ if (e.target.value) { s.from = e.target.value; renderProducao(); } });
   on("pdTo", "change", function(e){ if (e.target.value) { s.to = e.target.value; renderProducao(); } });
 }
+var PK_OPTS = {};
+function prodPickName(pid) { var p = products[pid]; return p ? p.name + " (" + (p.unit || "un") + ")" : ""; }
+// campo com busca: digite parte do nome e escolha na lista
+function prodPick(idAttr, sel, dis, placeholder) {
+  var pids = storeProductOrder(currentStoreId);
+  var raw = pids.filter(function(pid){ return products[pid].prodType === "bruto" || products[pid].centralOnly; });
+  function byName(a,b){ return (products[a].name||"").localeCompare(products[b].name||"", "pt-BR"); }
+  PK_OPTS[idAttr] = {raw: raw.slice().sort(byName), other: pids.filter(function(pid){ return raw.indexOf(pid) === -1; }).sort(byName)};
+  return '<div class="pk" data-pk="' + idAttr + '"><input type="hidden" id="' + idAttr + '" value="' + esc(sel || "") + '">' +
+    '<input type="text" class="pk-in" id="' + idAttr + 'T" autocomplete="off" placeholder="🔎 ' + esc(placeholder) + '" value="' + esc(prodPickName(sel)) + '"' + dis + '>' +
+    (dis ? '' : '<button type="button" class="pk-x" data-pkx="' + idAttr + '" title="Limpar">✕</button>') + '<div class="pk-list" id="' + idAttr + 'L"></div></div>';
+}
+function pkSet(id, pid) {
+  var h = document.getElementById(id), t = document.getElementById(id + "T"); if (!h) return;
+  var changed = h.value !== (pid || "");
+  h.value = pid || ""; t.value = pid ? prodPickName(pid) : "";
+  if (changed) h.dispatchEvent(new Event("change"));
+}
+function pkInit(root) {
+  root.querySelectorAll(".pk").forEach(function(box){
+    var id = box.getAttribute("data-pk"), h = document.getElementById(id), t = document.getElementById(id + "T"), list = document.getElementById(id + "L");
+    if (t.disabled) return;
+    function draw() {
+      var q = normTxt(t.value === prodPickName(h.value) ? "" : t.value), o = PK_OPTS[id] || {raw:[], other:[]};
+      function match(pid){ return !q || normTxt(products[pid].name).indexOf(q) !== -1; }
+      function row(pid){ return '<div class="pk-opt' + (pid === h.value ? ' on' : '') + '" data-pid="' + pid + '"><b>' + esc(products[pid].name) + '</b><small>' + esc(products[pid].unit || "un") + '</small></div>'; }
+      var r = o.raw.filter(match).slice(0, 30), x = o.other.filter(match).slice(0, 40 - Math.min(r.length, 30));
+      list.innerHTML = (r.length ? '<div class="pk-g">📥 Matéria-prima (não produzida)</div>' + r.map(row).join("") : '') +
+        (x.length ? '<div class="pk-g">Produzidos e demais itens</div>' + x.map(row).join("") : '') +
+        (!r.length && !x.length ? '<div class="pk-none">Nenhum item encontrado para “' + esc(t.value) + '”.</div>' : '');
+      list.style.display = "block";
+    }
+    t.addEventListener("focus", function(){ t.select(); draw(); });
+    t.addEventListener("input", draw);
+    t.addEventListener("blur", function(){ setTimeout(function(){ list.style.display = "none"; if (!t.value.trim()) pkSet(id, ""); else t.value = prodPickName(h.value); }, 160); });
+    list.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+    list.addEventListener("click", function(ev){ var o = ev.target.closest("[data-pid]"); if (!o) return; pkSet(id, o.getAttribute("data-pid")); list.style.display = "none"; t.blur(); });
+    var x = box.querySelector(".pk-x"); if (x) x.addEventListener("click", function(){ pkSet(id, ""); t.focus(); });
+  });
+}
 function prodProductSelect(idAttr, sel, dis, placeholder) {
   var pids = storeProductOrder(currentStoreId);
   var raw = pids.filter(function(pid){ return products[pid].prodType === "bruto" || products[pid].centralOnly; });
@@ -1063,9 +1111,9 @@ function openProductionForm(id) {
     (readOnly ? '<div class="sub" style="color:var(--amber);">Somente a Diretoria pode alterar ou excluir um lançamento de produção.</div>' : '') +
     '<div class="field"><label>Modelo de produção</label><div class="chip-group" id="pfTpls">' + tpls.map(function(t){
       return '<div class="chip' + (t.id === tplId ? ' selected' : '') + '" data-pft="' + esc(t.id) + '"' + (readOnly ? ' style="pointer-events:none;"' : '') + '>' + esc(t.name) + '</div>'; }).join("") + '</div></div>' +
-    '<div class="field"><label>Insumo (matéria-prima)</label>' + prodProductSelect("pfRawP", e ? (e.rawProductId || "") : "", dis, "— escolha o insumo —") + '</div>' +
-    '<div class="row2"><div class="field"><label>Produto produzido</label>' + prodProductSelect("pfFilP", e ? (e.filetProductId || "") : "", dis, "— escolha —") + '</div>' +
-      '<div class="field"><label>Produto da isca (opcional)</label>' + prodProductSelect("pfIscP", e ? (e.iscaProductId || "") : "", dis, "— nenhum —") + '</div></div>' +
+    '<div class="field"><label>Insumo (matéria-prima)</label>' + prodPick("pfRawP", e ? (e.rawProductId || "") : "", dis, "digite para buscar o insumo (ex: filé de frango)") + '</div>' +
+    '<div class="row2"><div class="field"><label>Produto produzido</label>' + prodPick("pfFilP", e ? (e.filetProductId || "") : "", dis, "buscar produzido") + '</div>' +
+      '<div class="field"><label>Produto da isca (opcional)</label>' + prodPick("pfIscP", e ? (e.iscaProductId || "") : "", dis, "buscar isca") + '</div></div>' +
     '<div class="field"><label>Data</label><input type="date" id="pfDate" value="' + (e ? e.date : todayStr()) + '"' + dis + '></div>' +
     '<div class="field"><label>Peso do produto bruto (kg)*</label><input type="number" inputmode="decimal" min="0" step="any" id="pfRaw" value="' + num(e && e.rawKg) + '" placeholder="Ex: 10,5"' + dis + '></div>' +
     '<div class="row2"><div class="field"><label>Quantidade de filés (un)*</label><input type="number" inputmode="numeric" min="0" step="1" id="pfQty" value="' + num(e && e.filetQty) + '"' + dis + '></div>' +
@@ -1101,10 +1149,11 @@ function openProductionForm(id) {
   function tplDefaults() {
     var t = tpls.filter(function(x){ return x.id === tplId; })[0] || {};
     [["pfRawP", t.rawProductId], ["pfFilP", t.filetProductId], ["pfIscP", t.iscaProductId]].forEach(function(a){
-      var s = document.getElementById(a[0]); if (s && a[1] && s.querySelector('option[value="' + a[1] + '"]')) s.value = a[1];
+      var o = PK_OPTS[a[0]]; if (a[1] && o && (o.raw.indexOf(a[1]) !== -1 || o.other.indexOf(a[1]) !== -1)) pkSet(a[0], a[1]);
     });
     stockInfo();
   }
+  pkInit(sheet);
   if (!e) tplDefaults();
   calc(); stockInfo();
   ["pfRaw","pfQty","pfFil","pfIsc","pfDsc"].forEach(function(i){ document.getElementById(i).addEventListener("input", function(){ calc(); stockInfo(); }); });
@@ -6585,7 +6634,7 @@ init();
 <div id="updBar" style="display:none;position:fixed;left:12px;right:12px;bottom:14px;z-index:9999;background:#1f6f43;color:#fff;border-radius:14px;padding:13px 16px;font:600 14.5px/1.3 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;text-align:center;">🔄 Saiu uma versão nova do sistema. <u>Toque aqui para atualizar</u></div>
 <script>
 (function(){
-  var APP_BUILD = "20261025145411";
+  var APP_BUILD = "20261025150432";
   var bar = document.getElementById("updBar"), checking = false;
   bar.addEventListener("click", function(){ location.reload(); });
   function check() {
