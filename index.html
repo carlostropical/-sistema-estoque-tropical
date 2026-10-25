@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261023182950">
+<meta name="app-build" content="20261025145411">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -402,6 +402,9 @@
 .cst-mode { display:flex; gap:6px; margin:0 0 12px 0; }
 .cst-mode button { flex:1; padding:9px 8px; border-radius:10px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-size:13.5px; font-weight:600; cursor:pointer; }
 .cst-mode button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.mv-fixed { display:block; font-size:10.5px; font-weight:600; color:var(--amber); }
+.mv-log { font-size:11.5px; color:var(--amber); margin-top:3px; cursor:pointer; line-height:1.35; } .mv-log u { color:var(--accent); }
+.mv-fix { margin-left:8px; align-self:center; }
 </style>
 </head>
 <body class="locked">
@@ -2097,12 +2100,82 @@ function renderStoreMovs() {
       var color = k === "entrada" ? "var(--green)" : (k === "saida" ? "var(--red)" : "var(--amber)");
       html += '<div class="move-item"><div class="move-icon ' + (k === "ajuste" ? "perda" : k) + '">' + (k === "entrada" ? "↓" : k === "saida" ? "↑" : k === "perda" ? "⚠" : "📋") + '</div>' +
         '<div class="move-body"><div class="move-title">' + esc(m.productName || (p ? p.name : "")) + '</div>' +
-        '<div class="move-sub">' + d.toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"}) + ' · ' + esc(MOV_KINDS[k].replace(/^\S+ /, "")) + (m.employeeName ? ' · ' + esc(m.employeeName) : '') + (m.note ? ' · ' + esc(m.note) : '') + '</div></div>' +
-        '<div class="move-qty" style="color:' + color + ';">' + (k === "entrada" ? "+" : k === "ajuste" ? "" : "−") + fmtQty(m.quantity) + ' ' + esc(p ? (p.unit || "un") : "un") + '</div></div>';
+        '<div class="move-sub">' + d.toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"}) + ' · ' + esc(MOV_KINDS[k].replace(/^\S+ /, "")) + (m.employeeName ? ' · ' + esc(m.employeeName) : '') + (m.note ? ' · ' + esc(m.note) : '') + '</div>' +
+        (m.correctedAt ? '<div class="mv-log" data-mvlog="' + m.id + '">✏️ Lançado por ' + esc(m.employeeName || "—") + ' · corrigido por ' + esc(m.correctedBy || "—") + ' em ' + fmtDate(m.correctedAt) + ': de ' + fmtQty(m.originalQuantity) + ' para ' + fmtQty(m.quantity) + ' — “' + esc(m.correctionReason || "") + '” <u>ver histórico</u></div>' : '') + '</div>' +
+        '<div class="move-qty" style="color:' + color + ';">' + (k === "entrada" ? "+" : k === "ajuste" ? "" : "−") + fmtQty(m.quantity) + ' ' + esc(p ? (p.unit || "un") : "un") +
+        (m.correctedAt ? '<small class="mv-fixed">corrigido (era ' + fmtQty(m.originalQuantity) + ')</small>' : '') + '</div>' +
+        (canFixMov() ? '<button class="link-btn mv-fix" data-fixmov="' + m.id + '" title="Corrigir lançamento">✏️</button>' : '') + '</div>';
     });
   }
   content.innerHTML = html;
   bindStoreMovs();
+  content.querySelectorAll("[data-mvlog]").forEach(function(b){ b.addEventListener("click", function(){ openMovCorrectionLog(b.getAttribute("data-mvlog")); }); });
+  content.querySelectorAll("[data-fixmov]").forEach(function(b){ b.addEventListener("click", function(){
+    var m = (movData ? movData.rows : []).filter(function(x){ return x.id === b.getAttribute("data-fixmov"); })[0]; if (m) openMovCorrection(m); }); });
+}
+// Corrige a quantidade de um lançamento e acerta o saldo pela diferença (Diretoria e Gerência)
+function canFixMov() { var r = currentRole(); return r === "Diretoria" || r === "Gerência"; }
+function openMovCorrectionLog(mid) {
+  db.collection("corrections").where("movementId", "==", mid).get().then(function(qs){
+    var list = qs.docs.map(function(d){ return d.data(); }).sort(function(a,b){ return (a.correctedAt||0) - (b.correctedAt||0); });
+    var h = '<h2>📜 Histórico da correção</h2>' + (list.length ? '<div class="sub">' + esc(list[0].productName) + ' · ' + esc(list[0].storeName) + '</div>' : '');
+    h += list.length ? list.map(function(x, i){
+      return '<div class="item-row" style="margin-bottom:8px;"><b>' + (i + 1) + 'ª correção · ' + fmtDate(x.correctedAt) + '</b><br>' +
+        'Lançamento de ' + fmtDate(x.movementAt) + ' feito por <b>' + esc(x.errorByName || "—") + '</b><br>' +
+        'Corrigido por <b>' + esc(x.correctedByName) + '</b> (' + esc(x.correctedByRole) + ')<br>' +
+        'Quantidade: <b>' + fmtQty(x.fromQty) + '</b> → <b>' + fmtQty(x.toQty) + '</b> · saldo ' + fmtQty(x.stockBefore) + ' → ' + fmtQty(x.stockAfter) + '<br>' +
+        'Justificativa: “' + esc(x.reason) + '”</div>';
+    }).join("") : '<div class="empty-state">Sem registro.</div>';
+    openSheet(h + '<button class="btn btn-secondary" id="mlClose">Fechar</button>');
+    document.getElementById("mlClose").addEventListener("click", closeSheet);
+  }).catch(function(err){ showToast("Erro: " + errMsg(err)); });
+}
+function openMovCorrection(m) {
+  if (!canFixMov()) { showToast("Somente Diretoria e Gerência corrigem lançamentos"); return; }
+  var p = products[m.productId], un = p ? (p.unit || "un") : "un", sign = m.type === "entrada" ? 1 : -1, k = movKind(m);
+  var h = '<h2>✏️ Corrigir lançamento</h2><div class="sub">' + esc(m.productName || (p ? p.name : "")) + ' · ' + esc(MOV_KINDS[k].replace(/^\S+ /, "")) + ' de <b>' + fmtQty(m.quantity) + ' ' + esc(un) + '</b> em ' + fmtDate(m.timestamp) + (m.employeeName ? ' por ' + esc(m.employeeName) : '') + '</div>' +
+    '<div class="field"><label>Quantidade correta (' + esc(un) + ')</label><input type="number" inputmode="decimal" id="mcQty" min="0" step="any" value="' + m.quantity + '"></div>' +
+    '<div class="field"><label>Justificativa do erro*</label><input type="text" id="mcWhy" placeholder="Ex: digitei 50 em vez de 5 — conferido na prateleira"></div>' +
+    '<div style="font-size:12px;color:var(--text-2);margin:-4px 0 10px;">Fica registrado para sempre: lançado por <b>' + esc(m.employeeName || "—") + '</b>, corrigido por <b>' + esc(currentEmployeeName || "—") + '</b>, com data, quantidades antes/depois e esta justificativa.</div>' +
+    '<div id="mcPrev" class="item-row" style="margin-bottom:10px;"></div>' +
+    '<button class="btn btn-primary" id="mcSave">Corrigir lançamento e saldo</button><button class="btn btn-secondary" id="mcCancel">Cancelar</button>';
+  openSheet(h);
+  var ref = db.doc("stock/" + m.storeId + "_" + m.productId), cur = null;
+  ref.get().then(function(s){ cur = s.exists ? (s.data().quantity || 0) : 0; prev(); });
+  function delta() { var q = parseFloat(document.getElementById("mcQty").value); return isNaN(q) ? null : sign * (q - m.quantity); }
+  function prev() {
+    var d = delta(), el = document.getElementById("mcPrev"); if (!el) return;
+    el.innerHTML = cur === null || d === null ? 'Calculando…' : 'Saldo atual: <b>' + fmtQty(cur) + ' ' + esc(un) + '</b> → depois da correção: <b>' + fmtQty(cur + d) + ' ' + esc(un) + '</b>' + (d === 0 ? ' <small>(sem alteração)</small>' : '') +
+      (cur + d < 0 ? '<div style="color:var(--red);font-size:12px;margin-top:4px;">⚠️ O saldo ficaria negativo.</div>' : '');
+  }
+  document.getElementById("mcQty").addEventListener("input", prev);
+  document.getElementById("mcCancel").addEventListener("click", closeSheet);
+  document.getElementById("mcSave").addEventListener("click", function(){
+    var q = parseFloat(document.getElementById("mcQty").value), why = document.getElementById("mcWhy").value.trim(), btn = this;
+    if (isNaN(q) || q < 0) { showToast("Informe a quantidade correta"); return; }
+    if (q === m.quantity) { showToast("A quantidade é a mesma do lançamento"); return; }
+    if (!why) { showToast("Escreva a justificativa da correção"); return; }
+    if (cur === null) { showToast("Aguarde carregar o saldo"); return; }
+    var d = sign * (q - m.quantity);
+    if (cur + d < 0 && !confirm("O saldo ficará negativo (" + fmtQty(cur + d) + "). Continuar?")) return;
+    btn.disabled = true; btn.textContent = "Corrigindo…";
+    var before = 0, orig = m.originalQuantity !== undefined ? m.originalQuantity : m.quantity;
+    ref.get().then(function(s){
+      before = s.exists ? (s.data().quantity || 0) : 0;
+      return ref.set({storeId:m.storeId, productId:m.productId, quantity: before + d, updatedAt: Date.now()});
+    }).then(function(){
+      return db.collection("corrections").add({movementId:m.id, storeId:m.storeId, storeName:m.storeName || (stores[m.storeId] ? stores[m.storeId].name : ""), productId:m.productId, productName:m.productName || (p ? p.name : ""),
+        kind:k, type:m.type, movementAt:m.timestamp, errorById:m.employeeId || null, errorByName:m.employeeName || "", fromQty:m.quantity, toQty:q, stockBefore:before, stockAfter:before + d,
+        reason:why, correctedById:currentEmployeeId, correctedByName:currentEmployeeName, correctedByRole:currentRole(), correctedAt:Date.now()});
+    }).then(function(){
+      return db.doc("movements/" + m.id).update({quantity:q, originalQuantity: m.originalQuantity !== undefined ? m.originalQuantity : m.quantity,
+        correctedAt:Date.now(), correctedBy:currentEmployeeName, correctionReason:why});
+    }).then(function(){
+      m.originalQuantity = m.originalQuantity !== undefined ? m.originalQuantity : m.quantity; m.quantity = q; m.correctedAt = Date.now(); m.correctedBy = currentEmployeeName; m.correctionReason = why;
+      networkCmvCache = {}; closeSheet(); showToast("Lançamento corrigido · saldo " + fmtQty(cur + d) + " " + un);
+      if (currentRoute === "estoque" && estoqueMovMode) renderStoreMovs();
+    }).catch(function(err){ showToast("Erro: " + errMsg(err)); btn.disabled = false; btn.textContent = "Corrigir lançamento e saldo"; });
+  });
 }
 function bindStoreMovs() {
   var s = movState;
@@ -6512,7 +6585,7 @@ init();
 <div id="updBar" style="display:none;position:fixed;left:12px;right:12px;bottom:14px;z-index:9999;background:#1f6f43;color:#fff;border-radius:14px;padding:13px 16px;font:600 14.5px/1.3 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;text-align:center;">🔄 Saiu uma versão nova do sistema. <u>Toque aqui para atualizar</u></div>
 <script>
 (function(){
-  var APP_BUILD = "20261023182950";
+  var APP_BUILD = "20261025145411";
   var bar = document.getElementById("updBar"), checking = false;
   bar.addEventListener("click", function(){ location.reload(); });
   function check() {
