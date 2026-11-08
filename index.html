@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261025150432">
+<meta name="app-build" content="20261108025403">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -413,6 +413,10 @@
 .pk-opt { display:flex; justify-content:space-between; gap:8px; padding:10px; border-bottom:1px solid var(--border); font-size:14px; cursor:pointer; }
 .pk-opt small { color:var(--text-2); } .pk-opt.on, .pk-opt:active { background:var(--accent-2); }
 .pk-none { padding:12px; font-size:13px; color:var(--text-2); }
+.cf-bar { display:flex; gap:8px; align-items:center; margin:0 0 12px 0; flex-wrap:wrap; } .cf-bar input { flex:1; min-width:140px; }
+.cf-red { color:var(--red); } .cf-neg { color:var(--red); } .cf-pos { color:var(--green); }
+.cf-div { border-left:4px solid var(--red); } .cf-line { cursor:pointer; } .cf-div small b { font-weight:700; }
+.cf-actions { display:flex; gap:8px; margin-top:14px; } .cf-actions .btn { flex:1; }
 </style>
 </head>
 <body class="locked">
@@ -1573,7 +1577,157 @@ function openEstoqueTopic(v) {
   if (v === "todas") { estoqueAllMode = true; allStock = null; storeSelect.style.display = "none"; renderAllStoresStock(); loadAllStock(); window.scrollTo(0, 0); return; }
   if (v === "pdf") { searchTerm = ""; estoqueCatFilter = ""; printEstoque(); return; }
   if (v === "necessidade") { needEdit = false; needSearch = ""; loadNeeds(currentStoreId, null, true); }
+  if (v === "conferencia") { confState.key = ""; confState.data = null; if (!confState.date) confState.date = todayStr(); }
   estoqueView = v; searchTerm = ""; renderEstoque(); window.scrollTo(0, 0);
+}
+var confState = {date:"", showAll:false, key:"", data:null, loading:false};
+function confRange(date) { var p = date.split("-"), a = new Date(+p[0], +p[1]-1, +p[2]).getTime(); return [a, a + 86400000]; }
+function confPrevDate(date) { var p = date.split("-"); return ymd(new Date(+p[0], +p[1]-1, +p[2]-1)); }
+function confHour(ts) { return new Date(ts).toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"}); }
+function confOrigin(m) {
+  if (m.kind === "producao") return "🔪 Produção";
+  if (m.kind === "recebimento_bruto") return "📥 Recebimento de mercadoria";
+  if (m.kind === "contagem") return "📋 Contagem";
+  return m.note ? m.note : "Entrada manual";
+}
+function loadConferencia() {
+  var sid = currentStoreId, date = confState.date, key = sid + "|" + date, r = confRange(date);
+  confState.key = key; confState.loading = true; confState.data = null;
+  Promise.all([
+    db.collection("movements").where("storeId", "==", sid).where("timestamp", ">=", r[0]).where("timestamp", "<", r[1]).get(),
+    db.doc("closings/" + sid + "_" + confPrevDate(date)).get(),
+    db.doc("closings/" + sid + "_" + date).get()
+  ]).then(function(res){
+    if (confState.key !== key) return;
+    confState.data = confCompute(res[0].docs.map(function(d){ return Object.assign({id:d.id}, d.data()); }), res[1], res[2], date);
+    confState.loading = false;
+    if (currentRoute === "estoque" && estoqueView === "conferencia") renderConferencia();
+  }).catch(function(err){ confState.loading = false; confState.data = {error: errMsg(err)}; if (currentRoute === "estoque" && estoqueView === "conferencia") renderConferencia(); });
+}
+function confCompute(movs, prevSnap, curSnap, date) {
+  var isToday = date === todayStr(), rows = {}, abastList = [], round = function(n){ return Math.round(n * 1000) / 1000; };
+  function row(pid) { return rows[pid] = rows[pid] || {pid:pid, abast:0, saidas:0, perdas:0, aj:0, list:[], counters:[]}; }
+  movs.sort(function(a,b){ return (a.timestamp||0) - (b.timestamp||0); }).forEach(function(m){
+    var x = row(m.productId), q = m.quantity || 0, k = movKind(m);
+    x.list.push(m);
+    if (k === "ajuste") { x.aj += (m.type === "entrada" ? q : -q); if (m.employeeName && x.counters.indexOf(m.employeeName) === -1) x.counters.push(m.employeeName); }
+    else if (k === "entrada") { x.abast += q; abastList.push(m); }
+    else if (k === "perda") x.perdas += q;
+    else x.saidas += q;
+  });
+  var prevB = prevSnap.exists ? (prevSnap.data().balances || {}) : null, curB = curSnap.exists ? (curSnap.data().balances || {}) : null;
+  var pids = {}; Object.keys(rows).forEach(function(p){ pids[p] = 1; });
+  [prevB, curB, isToday ? Object.keys(scopedStock).reduce(function(o,p){ o[p] = 1; return o; }, {}) : null].forEach(function(o){ if (o) Object.keys(o).forEach(function(p){ pids[p] = 1; }); });
+  var out = [], tot = {falta:0, sobra:0, nDiv:0, nAbast: abastList.length};
+  Object.keys(pids).forEach(function(pid){
+    if (!products[pid]) return;
+    var x = rows[pid] || {pid:pid, abast:0, saidas:0, perdas:0, aj:0, list:[], counters:[]};
+    var net = x.abast - x.saidas - x.perdas + x.aj;
+    var fin = isToday ? (scopedStock[pid] ? scopedStock[pid].quantity : 0) : (curB ? (curB[pid] || 0) : null);
+    var open = prevB ? (prevB[pid] || 0) : (fin !== null ? fin - net : null);
+    var expected = open !== null ? open + x.abast - x.saidas - x.perdas : null;
+    var unexplained = (prevB && fin !== null) ? round(fin - (open + net)) : 0;
+    var cost = costOf(pid), div = round(x.aj + unexplained);
+    if (div < 0) { tot.falta += -div * cost; } else if (div > 0) { tot.sobra += div * cost; }
+    if (x.aj !== 0 || unexplained !== 0) tot.nDiv++;
+    out.push({pid:pid, name:products[pid].name, unit:products[pid].unit || "un", open:open, abast:x.abast, saidas:x.saidas, perdas:x.perdas, expected:expected, aj:round(x.aj), unexplained:unexplained,
+      fin:fin, cost:cost, counters:x.counters, list:x.list, openSrc: prevB ? "fechamento" : "calculado", active: x.list.length > 0 || x.aj !== 0 || unexplained !== 0 || (open || 0) !== 0 || (fin || 0) !== 0});
+  });
+  out.sort(function(a,b){ return a.name.localeCompare(b.name, "pt-BR"); });
+  return {date:date, isToday:isToday, rows:out, abastList:abastList, tot:tot, hasPrev:!!prevB, hasCur:!!curB};
+}
+function renderConferencia() {
+  if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
+  if (!confState.date) confState.date = todayStr();
+  var sname = stores[currentStoreId] ? stores[currentStoreId].name : "", money = canSeeCmv();
+  var key = currentStoreId + "|" + confState.date;
+  var yest = confPrevDate(todayStr());
+  var html = topicHeader("🧾 Conferência do dia", "Compara o que <b>deveria</b> ter (abertura + abastecimento − saídas) com o que foi <b>contado</b>. Mostra quem abasteceu e onde há falta ou extravio.") +
+    '<div class="cf-bar"><div class="chip' + (confState.date === todayStr() ? ' selected' : '') + '" data-cfd="' + todayStr() + '">Hoje</div><div class="chip' + (confState.date === yest ? ' selected' : '') + '" data-cfd="' + yest + '">Ontem</div>' +
+    '<input type="date" id="cfDate" value="' + confState.date + '" max="' + todayStr() + '"></div>';
+  if (confState.key !== key) { content.innerHTML = html + '<div class="loading-msg">Carregando ' + esc(sname) + '…</div>'; bindTopicBack(); bindConfBar(); loadConferencia(); return; }
+  var d = confState.data;
+  if (!d) { content.innerHTML = html + '<div class="loading-msg">Carregando ' + esc(sname) + '…</div>'; bindTopicBack(); bindConfBar(); return; }
+  if (d.error) { content.innerHTML = html + '<div class="empty-state">Erro ao carregar: ' + esc(d.error) + '</div>'; bindTopicBack(); bindConfBar(); return; }
+  var divs = d.rows.filter(function(r){ return r.aj !== 0 || r.unexplained !== 0; });
+  html += '<div class="stat-grid"><div class="stat-box"><div class="num">' + d.tot.nAbast + '</div><div class="label">abastecimentos no dia</div></div>' +
+    '<div class="stat-box"><div class="num" style="color:' + (d.tot.nDiv ? 'var(--red)' : 'var(--green)') + ';">' + d.tot.nDiv + '</div><div class="label">itens com divergência</div></div>' +
+    (money ? '<div class="stat-box"><div class="num" style="color:var(--red);">' + fmtMoney(d.tot.falta) + '</div><div class="label">falta / extravio</div></div><div class="stat-box"><div class="num" style="color:var(--amber);">' + fmtMoney(d.tot.sobra) + '</div><div class="label">sobra</div></div>' : '') + '</div>';
+  if (!d.hasPrev) html += '<div class="item-row" style="border-color:var(--amber);margin-bottom:10px;">ℹ️ Não há fechamento gravado de ' + fmtDateShort(confPrevDate(d.date)) + ' para esta loja. A abertura foi calculada pelo saldo atual menos os lançamentos do dia.</div>';
+  if (!d.isToday && !d.hasCur) html += '<div class="item-row" style="border-color:var(--amber);margin-bottom:10px;">ℹ️ Este dia ainda não tem saldo de fechamento gravado (os fechamentos começam em 07/11/2026). Só os lançamentos aparecem.</div>';
+  // divergências
+  html += '<div class="topic-sub cf-red">⚠️ Divergências de falta ou extravio <span>(' + divs.length + ')</span></div>';
+  if (!divs.length) html += '<div class="topic-empty">Nenhuma divergência ' + (d.isToday ? 'até agora.' : 'neste dia.') + '</div>';
+  divs.forEach(function(r){
+    var parts = [];
+    if (r.aj !== 0) parts.push('Contagem' + (r.counters.length ? ' por <b>' + esc(r.counters.join(", ")) + '</b>' : '') + ': ' + (r.aj < 0 ? '<b class="cf-neg">faltou ' + fmtQty(-r.aj) + '</b>' : '<b class="cf-pos">sobrou ' + fmtQty(r.aj) + '</b>') + ' ' + esc(r.unit));
+    if (r.unexplained !== 0) parts.push('Saldo mudou <b>sem lançamento</b>: ' + (r.unexplained < 0 ? '<b class="cf-neg">−' + fmtQty(-r.unexplained) + '</b>' : '<b class="cf-pos">+' + fmtQty(r.unexplained) + '</b>') + ' ' + esc(r.unit));
+    var v = (r.aj + r.unexplained) * r.cost;
+    html += '<div class="topic-row cf-div" data-cfp="' + esc(r.pid) + '"><span><b>' + esc(r.name) + '</b><small>' + parts.join('<br>') + '</small></span>' + (money && r.cost ? '<b class="' + (v < 0 ? 'cf-neg' : 'cf-pos') + '">' + (v < 0 ? '−' : '+') + fmtMoney(Math.abs(v)) + '</b>' : '') + '</div>';
+  });
+  // abastecimento
+  html += '<div class="topic-sub">🚚 Abastecimento do dia <span>(' + d.abastList.length + ')</span></div>';
+  if (!d.abastList.length) html += '<div class="topic-empty">Nenhum abastecimento lançado.</div>';
+  d.abastList.forEach(function(m){
+    var p = products[m.productId];
+    html += '<div class="topic-row static"><span><b>' + esc(m.productName || (p ? p.name : "")) + '</b><small>' + confHour(m.timestamp) + ' · <b>' + esc(m.employeeName || "sem nome") + '</b> · ' + esc(confOrigin(m)) + '</small></span><b class="cf-pos">+' + fmtQty(m.quantity) + ' <small>' + esc(p ? (p.unit || "un") : "un") + '</small></b></div>';
+  });
+  // saldo por produto
+  var act = d.rows.filter(function(r){ return r.active; }), shown = confState.showAll ? d.rows : act.filter(function(r){ return r.list.length || r.aj || r.unexplained; });
+  html += '<div class="topic-sub">📦 Saldo por produto <span>(' + shown.length + ')</span> <button class="link-btn" id="cfAll" style="float:right;padding:0;font-size:12px;">' + (confState.showAll ? 'só com movimento' : 'mostrar todos') + '</button></div>';
+  if (!shown.length) html += '<div class="topic-empty">Sem movimentação neste dia.</div>';
+  shown.forEach(function(r){
+    html += '<div class="topic-row cf-line" data-cfp="' + esc(r.pid) + '"><span><b>' + esc(r.name) + '</b><small>' +
+      (r.open === null ? 'abertura —' : 'abertura ' + fmtQty(r.open)) + (r.abast ? ' · <span class="cf-pos">+' + fmtQty(r.abast) + ' abastecido</span>' : '') + (r.saidas ? ' · −' + fmtQty(r.saidas) + ' saída' : '') + (r.perdas ? ' · <span class="cf-neg">−' + fmtQty(r.perdas) + ' perda</span>' : '') +
+      (r.expected !== null ? ' → esperado <b>' + fmtQty(r.expected) + '</b>' : '') + (r.aj ? ' · contagem ' + (r.aj < 0 ? '' : '+') + fmtQty(r.aj) : '') + '</small></span>' +
+      '<b>' + (r.fin === null ? '—' : fmtQty(r.fin)) + ' <small>' + esc(r.unit) + '</small></b></div>';
+  });
+  html += '<div class="cf-actions"><button class="btn btn-secondary" id="cfPrint">🖨️ PDF / imprimir</button>' + (COUNT_ROLES.indexOf(currentRole()) !== -1 && !viewOnlyStore() ? '<button class="btn btn-primary" id="cfCount">📋 Fazer contagem agora</button>' : '') + '</div>';
+  content.innerHTML = html;
+  bindTopicBack(); bindConfBar();
+  var all = document.getElementById("cfAll"); if (all) all.addEventListener("click", function(){ confState.showAll = !confState.showAll; renderConferencia(); });
+  content.querySelectorAll("[data-cfp]").forEach(function(r){ r.addEventListener("click", function(){ openConfProduct(r.getAttribute("data-cfp")); }); });
+  document.getElementById("cfPrint").addEventListener("click", printConferencia);
+  var cc = document.getElementById("cfCount"); if (cc) cc.addEventListener("click", function(){ openCountForm(); });
+}
+function bindConfBar() {
+  bindTopicBack();
+  content.querySelectorAll("[data-cfd]").forEach(function(b){ b.addEventListener("click", function(){ confState.date = b.getAttribute("data-cfd"); confState.key = ""; confState.data = null; renderConferencia(); }); });
+  var dt = document.getElementById("cfDate");
+  if (dt) dt.addEventListener("change", function(){ if (!dt.value) return; confState.date = dt.value > todayStr() ? todayStr() : dt.value; confState.key = ""; confState.data = null; renderConferencia(); });
+}
+function openConfProduct(pid) {
+  var d = confState.data; if (!d || !d.rows) return;
+  var r = d.rows.filter(function(x){ return x.pid === pid; })[0]; if (!r) return;
+  var h = '<h2>' + esc(r.name) + '</h2><div class="sub">' + esc(stores[currentStoreId].name) + ' · ' + fmtDateShort(d.date) + '</div>' +
+    '<div class="item-row" style="margin-bottom:10px;">Abertura: <b>' + (r.open === null ? '—' : fmtQty(r.open)) + '</b> (' + r.openSrc + ') · abastecido <b>+' + fmtQty(r.abast) + '</b> · saídas <b>−' + fmtQty(r.saidas) + '</b> · perdas <b>−' + fmtQty(r.perdas) + '</b><br>' +
+    'Esperado: <b>' + (r.expected === null ? '—' : fmtQty(r.expected)) + '</b> · ' + (d.isToday ? 'saldo atual' : 'fechamento') + ': <b>' + (r.fin === null ? '—' : fmtQty(r.fin)) + '</b> ' + esc(r.unit) +
+    (r.unexplained ? '<br><span class="cf-neg">⚠ Saldo mudou ' + fmtQty(r.unexplained) + ' sem nenhum lançamento.</span>' : '') + '</div>' +
+    '<div class="chart-title">Lançamentos do dia</div>';
+  h += r.list.length ? r.list.map(function(m){
+    var k = movKind(m), sign = m.type === "entrada" ? "+" : "−";
+    return '<div class="topic-row static"><span><b>' + confHour(m.timestamp) + ' · ' + esc(MOV_KINDS[k].replace(/^\S+ /, "")) + '</b><small>' + esc(m.employeeName || "sem nome") + (m.note ? ' · ' + esc(m.note) : '') +
+      (m.kind === "contagem" && m.sysQty !== undefined ? ' · sistema ' + fmtQty(m.sysQty) + ' → contado ' + fmtQty(m.countedQty) : '') + '</small></span><b class="' + (sign === "+" ? 'cf-pos' : 'cf-neg') + '">' + sign + fmtQty(m.quantity) + '</b></div>';
+  }).join("") : '<div class="topic-empty">Nenhum lançamento neste dia.</div>';
+  openSheet(h + '<button class="btn btn-secondary" id="cfpClose" style="margin-top:12px;">Fechar</button>');
+  document.getElementById("cfpClose").addEventListener("click", closeSheet);
+}
+function printConferencia() {
+  var d = confState.data; if (!d || !d.rows) return;
+  var money = canSeeCmv(), sname = stores[currentStoreId].name;
+  var divs = d.rows.filter(function(r){ return r.aj || r.unexplained; });
+  var body = '<h3>Resumo</h3><table class="pr-table"><tr><th>Abastecimentos</th><th>Itens com divergência</th>' + (money ? '<th>Falta / extravio</th><th>Sobra</th>' : '') + '</tr><tr><td>' + d.tot.nAbast + '</td><td>' + d.tot.nDiv + '</td>' + (money ? '<td>' + fmtMoney(d.tot.falta) + '</td><td>' + fmtMoney(d.tot.sobra) + '</td>' : '') + '</tr></table>';
+  body += '<h3>Divergências de falta ou extravio</h3>' + (divs.length ? '<table class="pr-table"><tr><th>Produto</th><th class="n">Contagem</th><th class="n">Sem lançamento</th><th>Contado por</th>' + (money ? '<th class="n">Valor</th>' : '') + '</tr>' + divs.map(function(r){
+    return '<tr><td>' + esc(r.name) + '</td><td class="n">' + (r.aj ? fmtQty(r.aj) + ' ' + esc(r.unit) : '—') + '</td><td class="n">' + (r.unexplained ? fmtQty(r.unexplained) + ' ' + esc(r.unit) : '—') + '</td><td>' + esc(r.counters.join(", ")) + '</td>' + (money ? '<td class="n">' + fmtMoney((r.aj + r.unexplained) * r.cost) + '</td>' : '') + '</tr>';
+  }).join("") + '</table>' : '<p>Nenhuma divergência.</p>');
+  body += '<h3>Abastecimento do dia</h3>' + (d.abastList.length ? '<table class="pr-table"><tr><th>Hora</th><th>Produto</th><th class="n">Qtd</th><th>Abastecido por</th><th>Origem</th></tr>' + d.abastList.map(function(m){
+    var p = products[m.productId]; return '<tr><td>' + confHour(m.timestamp) + '</td><td>' + esc(m.productName || (p ? p.name : "")) + '</td><td class="n">+' + fmtQty(m.quantity) + ' ' + esc(p ? (p.unit || "un") : "un") + '</td><td>' + esc(m.employeeName || "") + '</td><td>' + esc(confOrigin(m)) + '</td></tr>';
+  }).join("") + '</table>' : '<p>Nenhum abastecimento lançado.</p>');
+  body += '<h3>Saldo por produto</h3><table class="pr-table"><tr><th>Produto</th><th class="n">Abertura</th><th class="n">Abastec.</th><th class="n">Saídas</th><th class="n">Perdas</th><th class="n">Esperado</th><th class="n">Contagem</th><th class="n">Final</th></tr>' +
+    d.rows.filter(function(r){ return r.list.length || r.aj || r.unexplained; }).map(function(r){
+      return '<tr><td>' + esc(r.name) + '</td><td class="n">' + (r.open === null ? '—' : fmtQty(r.open)) + '</td><td class="n">' + fmtQty(r.abast) + '</td><td class="n">' + fmtQty(r.saidas) + '</td><td class="n">' + fmtQty(r.perdas) + '</td><td class="n">' + (r.expected === null ? '—' : fmtQty(r.expected)) + '</td><td class="n">' + fmtQty(r.aj) + '</td><td class="n">' + (r.fin === null ? '—' : fmtQty(r.fin)) + ' ' + esc(r.unit) + '</td></tr>';
+    }).join("") + '</table>';
+  openPrintPreview("Conferência do dia · " + sname, [fmtDate(confRange(d.date)[0]), "Esperado = abertura + abastecimento − saídas − perdas. Divergência = diferença na contagem ou mudança de saldo sem lançamento."], body);
 }
 function renderEstoqueHub() {
   var role = currentRole(), canCount = COUNT_ROLES.indexOf(role) !== -1;
@@ -1599,6 +1753,7 @@ function renderEstoqueHub() {
     card("saldo", "📦", "Saldo do estoque", "Quanto há de cada produto. Entrada, saída e perda.", ids.length + " produtos · " + withStock + " com estoque" + (low ? ' · <span class="tc-warn">' + low + ' abaixo do mínimo</span>' : '')) +
     card("movs", "📒", "Lançamentos por data", "Entradas, saídas, perdas e ajustes por dia, semana ou mês.", "") +
     (ALL_STOCK_ROLES.indexOf(role) !== -1 ? card("todas", "🌐", "Todas as lojas · estoque global", "Saldo de cada produto em cada loja, total da rede e valor em R$.", "") : '') +
+    card("conferencia", "🧾", "Conferência do dia", "Abertura, abastecimentos (quem e quando), saídas e divergências de falta ou extravio.", "saldo gravado todo dia à meia-noite") +
     card("necessidade", "📊", "Necessidade da loja", "Quanto a loja precisa por dia e a sugestão do que pedir.", (function(){
       var it = needsCache[currentStoreId]; if (!it) { loadNeeds(currentStoreId, function(){ if (currentRoute === "estoque" && !estoqueView && !estoqueMovMode && !estoqueAllMode) renderEstoqueHub(); }); return "carregando…"; }
       var ks = Object.keys(it).filter(function(pid){ return products[pid] && productInStore(pid, currentStoreId); }), low = ks.filter(function(pid){ return needSuggestion(pid, it[pid]) > 0; }).length;
@@ -1929,6 +2084,7 @@ function renderEstoque() {
   if (!estoqueView) { renderEstoqueHub(); return; }
   if (estoqueView === "contagem") { renderCountTopic(); return; }
   if (estoqueView === "necessidade") { renderNeedsTopic(); return; }
+  if (estoqueView === "conferencia") { renderConferencia(); return; }
   if (estoqueView === "produzido" || estoqueView === "bruto") { renderKindTopic(estoqueView); return; }
   var list = storeProductOrder(currentStoreId).map(function(id){ return products[id]; });
   if (searchTerm) {
@@ -2446,6 +2602,7 @@ function saveCountCategory(catKey, btn) {
   var chain = db.collection("counts").add({
     storeId: currentStoreId, storeName: storeName, date: date, partial: true, categoryId: catKey, categoryName: catName, kind: countKind || "",
     items: items, totalValue: total, adjustments: diffs.length,
+    diffs: diffs.map(function(d){ return {productId:d.pid, productName:d.name, sys:d.sys, counted:d.q, diff:d.q - d.sys, unitCost:(products[d.pid] && products[d.pid].cost) || 0}; }),
     employeeId: currentEmployeeId, employeeName: currentEmployeeName, createdAt: Date.now()
   });
   diffs.forEach(function(d){
@@ -2454,6 +2611,7 @@ function saveCountCategory(catKey, btn) {
         .then(function(){
           scopedStock[d.pid] = {storeId:currentStoreId, productId:d.pid, quantity:d.q, updatedAt:Date.now()};
           return db.collection("movements").add({storeId:currentStoreId, storeName:storeName, productId:d.pid, productName:d.name,
+            kind: "contagem", sysQty: d.sys, countedQty: d.q,
             type: d.q > d.sys ? "entrada" : "saida", quantity: Math.abs(d.q - d.sys),
             employeeId:currentEmployeeId, employeeName:currentEmployeeName, note:"Contagem parcial (" + catName + ") " + fmtDateShort(date), timestamp:Date.now()});
         });
@@ -2495,13 +2653,15 @@ function submitCount() {
   var kindNow = countKind;
   var chain = db.collection("counts").add(Object.assign({
     storeId: currentStoreId, storeName: storeName, date: date, items: items, totalValue: total,
-    adjustments: diffs.length, employeeId: currentEmployeeId, employeeName: currentEmployeeName, createdAt: Date.now()
+    adjustments: diffs.length, employeeId: currentEmployeeId, employeeName: currentEmployeeName, createdAt: Date.now(),
+    diffs: diffs.map(function(d){ return {productId:d.pid, productName:d.name, sys:d.sys, counted:d.q, diff:d.q - d.sys, unitCost:(products[d.pid] && products[d.pid].cost) || 0}; })
   }, kindNow ? {partial: true, kind: kindNow, categoryName: "Estoque produzido"} : {}));
   diffs.forEach(function(d){
     chain = chain.then(function(){
       return db.doc("stock/"+currentStoreId+"_"+d.pid).set({storeId:currentStoreId, productId:d.pid, quantity:d.q, updatedAt:Date.now()})
         .then(function(){
           return db.collection("movements").add({storeId:currentStoreId, storeName:storeName, productId:d.pid, productName:d.name,
+            kind: "contagem", sysQty: d.sys, countedQty: d.q,
             type: d.q > d.sys ? "entrada" : "saida", quantity: Math.abs(d.q - d.sys),
             employeeId:currentEmployeeId, employeeName:currentEmployeeName, note:(kindNow ? "Contagem do produzido " : "Ajuste de contagem ") + fmtDateShort(date), timestamp:Date.now()});
         });
@@ -5230,7 +5390,7 @@ function repRows(type, r) {
 
 var MOV_KINDS = {entrada:"↓ Entrada", saida:"↑ Saída", perda:"⚠ Perda", ajuste:"📋 Ajuste de contagem"};
 function movKind(m) {
-  if (/^(Ajuste de contagem|Contagem parcial)/.test(m.note || "")) return "ajuste";
+  if (m.kind === "contagem" || /^(Ajuste de contagem|Contagem parcial|Contagem do produzido)/.test(m.note || "")) return "ajuste";
   return m.type === "perda" ? "perda" : (m.type === "saida" ? "saida" : "entrada");
 }
 function groupKey(row, g) {
