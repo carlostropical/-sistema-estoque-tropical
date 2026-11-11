@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261108025403">
+<meta name="app-build" content="20261111205206">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -417,6 +417,9 @@
 .cf-red { color:var(--red); } .cf-neg { color:var(--red); } .cf-pos { color:var(--green); }
 .cf-div { border-left:4px solid var(--red); } .cf-line { cursor:pointer; } .cf-div small b { font-weight:700; }
 .cf-actions { display:flex; gap:8px; margin-top:14px; } .cf-actions .btn { flex:1; }
+.stat-tap { cursor:pointer; border-color:var(--amber); } .stat-tap u { color:var(--accent); text-decoration:none; font-weight:700; }
+.cst-tap { cursor:pointer; } .cst-store-tag { color:var(--accent); font-weight:700; }
+.low-row { cursor:pointer; border-left:4px solid var(--amber); }
 </style>
 </head>
 <body class="locked">
@@ -2024,7 +2027,7 @@ function renderPainel() {
 
   var html = '<div class="stat-grid">' +
     '<div class="stat-box"><div class="num">' + totalItems + '</div><div class="label">produtos cadastrados</div></div>' +
-    '<div class="stat-box"><div class="num" style="color:var(--amber)">' + lowStockCount + '</div><div class="label">estoque baixo</div></div>' +
+    '<div class="stat-box' + (lowStockCount ? ' stat-tap' : '') + '"' + (lowStockCount ? ' id="lowBox" role="button" tabindex="0"' : '') + '><div class="num" style="color:var(--amber)">' + lowStockCount + '</div><div class="label">estoque baixo' + (lowStockCount ? ' · <u>ver itens ›</u>' : '') + '</div></div>' +
     (showCmv ? '<div class="stat-box"><div class="num">' + fmtMoney(monthSales) + '</div><div class="label">vendas no mês</div></div>' +
       (isCentralStore
         ? '<div class="stat-box"><div class="num">—</div><div class="label">CMV geral: ver Vendas & CMV</div></div>'
@@ -2053,6 +2056,25 @@ function renderPainel() {
     });
   }
   content.innerHTML = html;
+  var lb = document.getElementById("lowBox"); if (lb) lb.addEventListener("click", openLowStockList);
+}
+function openLowStockList() {
+  var sid = currentStoreId, rows = [];
+  storeProductOrder(sid).forEach(function(pid){
+    var p = products[pid], qty = scopedStock[pid] ? scopedStock[pid].quantity : 0;
+    if (typeof p.minStock === "number" && p.minStock > 0 && qty <= p.minStock) rows.push({pid:pid, p:p, qty:qty, min:p.minStock, falta:p.minStock - qty, ratio:qty / p.minStock});
+  });
+  rows.sort(function(a,b){ return a.ratio - b.ratio || a.p.name.localeCompare(b.p.name, "pt-BR"); });
+  var h = '<h2>⚠️ Estoque baixo</h2><div class="sub">' + esc(stores[sid] ? stores[sid].name : "") + ' · ' + rows.length + ' item(ns) no mínimo ou abaixo. Os mais críticos primeiro.</div>';
+  h += rows.length ? rows.map(function(r){
+    var zero = r.qty <= 0, cat = r.p.categoryId && categories[r.p.categoryId] ? categories[r.p.categoryId].name : "";
+    return '<div class="topic-row low-row" data-lowp="' + esc(r.pid) + '"><span><b>' + esc(r.p.name) + '</b><small>' + (cat ? esc(cat) + ' · ' : '') + 'mínimo ' + fmtQty(r.min) + ' ' + esc(r.p.unit || "un") + ' · ' + (r.falta > 0 ? 'faltam <b>' + fmtQty(r.falta) + '</b>' : '<b>no mínimo</b>') + '</small></span>' +
+      '<b class="' + (zero ? 'cf-neg' : '') + '" style="color:' + (zero ? 'var(--red)' : 'var(--amber)') + ';">' + (zero ? 'ZERADO' : fmtQty(r.qty)) + ' <small>' + esc(r.p.unit || "un") + '</small></b></div>';
+  }).join("") : '<div class="topic-empty">Nenhum item abaixo do mínimo.</div>';
+  h += '<button class="btn btn-secondary" id="lowClose" style="margin-top:12px;">Fechar</button>';
+  openSheet(h);
+  document.getElementById("lowClose").addEventListener("click", closeSheet);
+  sheet.querySelectorAll("[data-lowp]").forEach(function(r){ r.addEventListener("click", function(){ openProductStockDetail(r.getAttribute("data-lowp")); }); });
 }
 
 function barChart(items) {
@@ -4481,22 +4503,55 @@ function renderCustosAll() {
     }).catch(function(err){ showToast("Erro ao carregar custos: " + errMsg(err)); });
     return;
   }
-  var by = {}, total = 0;
+  if (!costSubs) { content.innerHTML = head + '<div class="loading-msg">Carregando custos…</div>'; bind(); loadCostSubs(function(){ if (currentRoute === "custos" && custosAll) renderCustos(); }); return; }
+  var by = {}, total = 0, nm = function(sid, x){ return stores[sid] ? stores[sid].name : ((x && x.storeName) || "Loja removida"); };
   data.forEach(function(x){ (by[x.storeId] = by[x.storeId] || []).push(x); total += x.amount || 0; });
-  var html = head + '<div class="stat-grid"><div class="stat-box wide"><div class="num">' + fmtMoney(total) + '</div><div class="label">total de custos no mês · todas as lojas (' + data.length + ' lançamentos)</div></div></div>';
+  var html = head + '<div class="stat-grid"><div class="stat-box wide"><div class="num">' + fmtMoney(total) + '</div><div class="label">soma unificada de todas as lojas · ' + data.length + ' lançamentos</div></div></div>';
+  if (!data.length) html += '<div class="empty-state"><div class="emoji">💰</div>Nenhum custo lançado neste mês.</div>';
+  var byId = {}; data.forEach(function(x){ byId[x.id] = x; });
+  html += data.length ? '<div class="topic-sub">🌐 Todas as lojas juntas · por pilar</div>' : '';
+  PILLARS.forEach(function(pl){
+    var list = data.filter(function(x){ return (x.pillar || "outro") === pl.v; });
+    if (!list.length) return;
+    var pt = list.reduce(function(s,x){ return s + (x.amount||0); }, 0);
+    var subs = {}, order = costSubgroups(pl.v).slice();
+    list.forEach(function(x){ var k = x.subgroup || "Sem subgrupo"; (subs[k] = subs[k] || []).push(x); if (order.indexOf(k) === -1) order.push(k); });
+    html += '<div class="cst-pillar"><div class="cst-ph"><span class="pill pill-' + pl.v + '">' + pl.l + '</span><span><b>' + fmtMoney(pt) + '</b><small>' + (total ? Math.round(pt / total * 100) : 0) + '%</small></span></div>' +
+      '<div class="cst-bar"><i style="width:' + (total ? (pt / total * 100).toFixed(1) : 0) + '%;"></i></div>';
+    order.forEach(function(k){
+      var items = subs[k]; if (!items) return;
+      var st = items.reduce(function(s,x){ return s + (x.amount||0); }, 0), key = "all|" + pl.v + "|" + k;
+      html += '<div class="cst-sub" data-cst="' + esc(key) + '"><span>' + (costOpen[key] ? "▾ " : "▸ ") + esc(k) + '<small>(' + items.length + ')</small></span><b>' + fmtMoney(st) + '</b></div>';
+      if (costOpen[key]) {
+        html += '<div class="cst-items">' + items.sort(function(a,b){ return (b.createdAt||0) - (a.createdAt||0); }).map(function(x){
+          return '<div class="cst-item cst-tap" data-cit="' + esc(x.id) + '"><span>' + esc(x.label || k) + '<small><b class="cst-store-tag">🏬 ' + esc(nm(x.storeId, x)) + '</b>' + (x.createdAt ? ' · ' + fmtDate(x.createdAt) : '') + (x.employeeName ? ' · ' + esc(x.employeeName) : '') + '</small></span><b>' + fmtMoney(x.amount) + '</b></div>';
+        }).join("") + '</div>';
+      }
+    });
+    html += '</div>';
+  });
   var ids = storeOrder.filter(function(s){ return by[s]; }).concat(Object.keys(by).filter(function(s){ return storeOrder.indexOf(s) === -1; }));
-  if (!ids.length) html += '<div class="empty-state"><div class="emoji">💰</div>Nenhum custo lançado neste mês.</div>';
+  if (ids.length) html += '<div class="topic-sub">🏬 Por loja <span>(toque para abrir a loja)</span></div>';
   ids.forEach(function(sid){
     var list = by[sid], st = list.reduce(function(a,x){ return a + (x.amount||0); }, 0);
-    var nm = stores[sid] ? stores[sid].name : (list[0].storeName || "Loja removida");
-    html += '<div class="cst-pillar cst-store" data-cstore="' + esc(sid) + '"><div class="cst-ph"><span><b>🏬 ' + esc(nm) + '</b> <small>' + list.length + ' lançamento' + (list.length === 1 ? '' : 's') + '</small></span><span><b>' + fmtMoney(st) + '</b><small>' + (total ? Math.round(st / total * 100) : 0) + '%</small></span></div>' +
+    html += '<div class="cst-pillar cst-store" data-cstore="' + esc(sid) + '"><div class="cst-ph"><span><b>🏬 ' + esc(nm(sid, list[0])) + '</b> <small>' + list.length + ' lançamento' + (list.length === 1 ? '' : 's') + '</small></span><span><b>' + fmtMoney(st) + '</b><small>' + (total ? Math.round(st / total * 100) : 0) + '%</small></span></div>' +
       '<div class="cst-bar"><i style="width:' + (total ? (st / total * 100).toFixed(1) : 0) + '%;"></i></div>' +
       '<div class="cst-pills">' + PILLARS.map(function(pl){
         var v = list.filter(function(x){ return (x.pillar || "outro") === pl.v; }).reduce(function(a,x){ return a + (x.amount||0); }, 0);
         return v ? '<span class="pill pill-' + pl.v + '">' + pl.l + ' ' + fmtMoney(v) + '</span>' : '';
-      }).join("") + '</div><div class="cst-open">Toque para ver os lançamentos ›</div></div>';
+      }).join("") + '</div></div>';
   });
   content.innerHTML = html; bind();
+  content.querySelectorAll("[data-cst]").forEach(function(r){ r.addEventListener("click", function(){ var k = r.getAttribute("data-cst"); costOpen[k] = !costOpen[k]; renderCustos(); }); });
+  content.querySelectorAll("[data-cit]").forEach(function(r){ r.addEventListener("click", function(){ var x = byId[r.getAttribute("data-cit")]; if (x) openCostDetail(x, nm(x.storeId, x)); }); });
+}
+function openCostDetail(x, storeName) {
+  var pl = PILLARS.filter(function(p){ return p.v === (x.pillar || "outro"); })[0];
+  openSheet('<h2>' + esc(x.label || x.subgroup || "Custo") + '</h2><div class="sub">' + fmtMoney(x.amount) + '</div>' +
+    '<div class="item-row" style="line-height:1.7;"><b>🏬 Loja:</b> ' + esc(storeName) + '<br><b>Pilar:</b> ' + (pl ? esc(pl.l) : "—") + '<br><b>Subgrupo:</b> ' + esc(x.subgroup || "Sem subgrupo") + '<br><b>Mês de competência:</b> ' + esc((x.month || "").split("-").reverse().join("/")) +
+    '<br><b>Lançado por:</b> ' + esc(x.employeeName || "—") + (x.createdAt ? ' em ' + fmtDate(x.createdAt) : '') + '</div>' +
+    '<button class="btn btn-secondary" id="ccClose" style="margin-top:12px;">Fechar</button>');
+  document.getElementById("ccClose").addEventListener("click", closeSheet);
 }
 function renderCustos() {
   if (custosAll && canManageCostSubs()) { renderCustosAll(); return; }
