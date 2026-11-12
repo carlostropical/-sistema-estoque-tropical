@@ -168,10 +168,10 @@ a.btn{text-decoration:none;color:var(--fg)}
 "use strict";
 /* ============ estado ============ */
 const DEF_PERFIL={culinarias:['MARMITA','BRASILEIRA','CASEIRA','PRATO FEITO'],raioKm:5,faixas:[1,2],notaMin:4.3,ticketMin:20,ticketMax:45,scoreMin:60};
-const S={insumos:new Map(),fichas:new Map(),vinculos:new Map(),notas:[],concorrentes:new Map(),
+const S={cats:new Map(),prods:new Map(),insumos:new Map(),fichas:new Map(),vinculos:new Map(),notas:[],concorrentes:new Map(),
   config:{cmvPadrao:0.3,cmvDelivery:0.3,diasAlerta:45,alertaVar:0.15,comissaoIfood:0.26,regraPreco:'ultimo',perfil:{...DEF_PERFIL}},
   loaded:{insumos:false,fichas:false},canWrite:true,db:null,user:null,uid:null,sample:null,sampleImg:false};
-const UI={gramas:false,tab:'painel',qIns:'',fIns:'todos',qFic:'',fCat:'todas',nota:null,impacto:null,fila:[],concSo:true,qConc:''};
+const UI={gCat:'todas',gramas:false,tab:'painel',qIns:'',fIns:'todos',qFic:'',fCat:'todas',nota:null,impacto:null,fila:[],concSo:true,qConc:''};
 try{const t=localStorage.getItem('ft.tab');if(t)UI.tab=t;}catch(e){}
 if(location.hash&&/^#(painel|insumos|fichas|notas|conc|pend)$/.test(location.hash))UI.tab=location.hash.slice(1);
 
@@ -299,6 +299,10 @@ function pendencias(){
   if(vazias.length)P.push({sev:'warn',k:'vazias',titulo:`${vazias.length} ficha(s) sem ingredientes`,txt:'Fichas criadas para montar (combos e pratos novos). Abra e adicione os itens.',lista:vazias});
   const lim=S.config.diasAlerta||45;
   const velhos=[...S.insumos.values()].filter(i=>!i.fichaId&&Number(i.preco)>0&&(!i.dataPreco||daysSince(i.dataPreco)>lim));
+  const aConv=[...S.insumos.values()].filter(semConv);
+  if(aConv.length)P.push({sev:'warn',k:'semconv',titulo:`${aConv.length} insumo(s) ligado(s) ao estoque aguardando conversão de unidade`,txt:'O estoque conta em uma unidade e a ficha usa outra (ex.: alface por unidade × kg). Abra o insumo e informe quanto 1 unidade do estoque vale na unidade da ficha para o preço sincronizar.',lista:aConv});
+  const semLig=[...S.insumos.values()].filter(i=>!i.fichaId&&!(i.produtoIds||[]).length);
+  if(semLig.length)P.push({sev:'info',k:'semlig',titulo:`${semLig.length} insumo(s) comprado(s) sem ligação com produto do estoque`,txt:'Sem ligação o preço não é unificado. Abra o insumo e escolha o produto do estoque (há sugestões pelo nome).',lista:semLig});
   if(velhos.length)P.push({sev:'info',k:'velhos',titulo:`${velhos.length} preço(s) sem data ou com mais de ${lim} dias`,txt:'Importe as notas de compra recentes para atualizar de uma vez. Os preços vindos da planilha não tinham data de cotação.',lista:velhos});
   const acima=[];for(const f of S.fichas.values()){const c=custoFicha(f);const p=precos(f,c);if((p.real!=null&&p.real>p.cmv+0.005)||(p.realI!=null&&p.realI>p.cmv+0.005))acima.push({f,c,p});}
   if(acima.length)P.push({sev:'bad',k:'acima',titulo:`${acima.length} ficha(s) com CMV acima da meta`,txt:'O preço de venda cadastrado (salão ou iFood, já descontada a comissão) não cobre a meta de CMV com o custo atual.',lista:acima});
@@ -416,6 +420,14 @@ function vPainel(m,P){
   </section>`;
 }
 
+/* ---------- Categorias (gêneros do estoque) e vínculo com produtos ---------- */
+const PREP_CAT='pre-preparo';
+function catNome(id){if(id===PREP_CAT)return 'Pré-preparo (produzido na cozinha)';const c=S.cats.get(id);return c?c.name:'Sem categoria';}
+function catDe(i){return i.fichaId?PREP_CAT:(i.categoriaId&&(S.cats.has(i.categoriaId)||i.categoriaId===PREP_CAT)?i.categoriaId:'');}
+function catsOrdenadas(){return [...S.cats.values()].filter(c=>!/^Baratos da Semana/i.test(c.name||'')).sort((a,b)=>(a.name||'').localeCompare(b.name||'','pt-BR'));}
+function prodsDe(i){return (i.produtoIds||[]).map(id=>S.prods.get(id)).filter(Boolean);}
+function semConv(i){return !i.fichaId&&(i.produtoIds||[]).length>0&&!(Number(i.conv)>0);}
+
 /* ---------- Insumos ---------- */
 function vInsumos(m){
   const q=fold(UI.qIns);
@@ -423,7 +435,13 @@ function vInsumos(m){
   if(UI.fIns==='comprados')list=list.filter(i=>!i.fichaId);
   if(UI.fIns==='produzidos')list=list.filter(i=>i.fichaId);
   if(UI.fIns==='semdata')list=list.filter(i=>!i.fichaId&&!i.dataPreco);
+  if(UI.fIns==='vinculados')list=list.filter(i=>(i.produtoIds||[]).length);
+  if(UI.fIns==='semvinculo')list=list.filter(i=>!i.fichaId&&!(i.produtoIds||[]).length);
+  if(UI.fIns==='semconv')list=list.filter(semConv);
+  if(UI.gCat!=='todas')list=list.filter(i=>catDe(i)===UI.gCat);
   list.sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+  const grupos=new Map();list.forEach(i=>{const k=catDe(i);grupos.set(k,[...(grupos.get(k)||[]),i]);});
+  const ordem=[...catsOrdenadas().map(c=>c.id),'',PREP_CAT].filter(k=>grupos.has(k));
   const uso=new Map();for(const f of S.fichas.values())for(const it of f.itens||[])uso.set(it.insumoId,(uso.get(it.insumoId)||0)+1);
   const media=S.config.regraPreco==='medio';
   m.innerHTML=`<section class="view">
@@ -432,20 +450,25 @@ function vInsumos(m){
    <div class="row">
      <input class="input grow" id="qIns" placeholder="Buscar insumo, fornecedor ou código" value="${esc(UI.qIns)}" style="max-width:420px">
      <select class="input" id="fIns" style="width:auto">
-       ${[['todos','Todos'],['comprados','Comprados'],['produzidos','Produzidos (pré-preparo)'],['semdata','Sem data de preço']].map(([v,l])=>`<option value="${v}" ${UI.fIns===v?'selected':''}>${l}</option>`).join('')}
+       ${[['todos','Todos'],['comprados','Comprados'],['produzidos','Produzidos (pré-preparo)'],['semdata','Sem data de preço'],['vinculados','Ligados ao estoque'],['semvinculo','Sem ligação com o estoque'],['semconv','Aguardando conversão']].map(([v,l])=>`<option value="${v}" ${UI.fIns===v?'selected':''}>${l}</option>`).join('')}
+     </select>
+     <select class="input" id="gCat" style="width:auto">
+       <option value="todas">Todas as categorias</option>${catsOrdenadas().map(c=>`<option value="${esc(c.id)}" ${UI.gCat===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}<option value="${PREP_CAT}" ${UI.gCat===PREP_CAT?'selected':''}>Pré-preparo (produzido na cozinha)</option>
      </select>
      <span class="muted small">${list.length} itens</span>
    </div>
-   <div class="tbl-wrap"><table><thead><tr><th>Insumo</th><th>Un.</th><th class="r">FC</th><th class="r">Último preço</th><th class="r">Média 90d</th><th class="r">Var.</th><th>Fornecedor</th><th>Atualizado</th><th class="r">Fichas</th></tr></thead><tbody>
-   ${list.map(i=>{const p=precoInsumo(i);const v=i.precoAnterior&&!i.fichaId?(i.preco-i.precoAnterior)/i.precoAnterior:null;const fc=fcOf(i);
+   <div class="tbl-wrap"><table><thead><tr><th>Insumo</th><th>Un.</th><th class="r">FC</th><th class="r">Último preço</th><th class="r">Média 90d</th><th class="r">Var.</th><th>Fornecedor</th><th>Atualizado</th><th class="r">Fichas</th><th>Produto no estoque</th></tr></thead><tbody>
+   ${ordem.map(k=>`<tr class="grp"><td colspan="10">${esc(catNome(k))} · ${grupos.get(k).length}</td></tr>`+grupos.get(k).map(i=>{const p=precoInsumo(i);const v=i.precoAnterior&&!i.fichaId?(i.preco-i.precoAnterior)/i.precoAnterior:null;const fc=fcOf(i);
      return `<tr class="click" data-ins="${esc(i.id)}"><td>${esc(i.nome)} ${i.fichaId?'<span class="pill prep">ficha</span>':''}${i.codigoEstoque?` <span class="small muted">${esc(i.codigoEstoque)}</span>`:''}</td><td class="muted">${esc(i.un)}</td>
      <td class="r num ${fc>1.0001||fc<=0?'up':''}">${n2(fc)}</td><td class="r num">${i.fichaId?brl(p):Number(i.preco)>0?brl(Number(i.preco)):'<span class="up">sem preço</span>'}</td>
      <td class="r num muted">${!i.fichaId&&i.precoMedio?brl(i.precoMedio):''}</td>
      <td class="r num ${v>0?'up':v<0?'down':''}">${v==null?'':(v>0?'+':'')+pct(v)}</td><td class="small">${esc(i.fornecedor||'')}</td>
-     <td class="small muted">${i.fichaId?'automático':fmtDate(i.dataPreco)}</td><td class="r num">${uso.get(i.id)||0}</td></tr>`}).join('')||`<tr><td colspan="9" class="empty">Nenhum insumo encontrado.</td></tr>`}
+     <td class="small muted">${i.fichaId?'automático':fmtDate(i.dataPreco)}</td><td class="r num">${uso.get(i.id)||0}</td>
+     <td class="small">${i.fichaId?'<span class="muted">—</span>':(i.produtoIds||[]).length?`🔗 ${esc(prodsDe(i).map(p=>p.name).join(' · ')||i.vinculoNome||'')}${semConv(i)?' <span class="pill warn">definir conversão</span>':''}`:'<span class="muted">sem ligação</span>'}</td></tr>`}).join('')).join('')||`<tr><td colspan="10" class="empty">Nenhum insumo encontrado.</td></tr>`}
    </tbody></table></div></section>`;
   const qi=$('#qIns');qi.oninput=()=>{UI.qIns=qi.value;const pos=qi.selectionStart;render();const n=$('#qIns');n.focus();n.setSelectionRange(pos,pos);};
   $('#fIns').onchange=e=>{UI.fIns=e.target.value;render();};
+  $('#gCat').onchange=e=>{UI.gCat=e.target.value;render();};
   $('#novoIns').onclick=()=>abrirInsumo(null);
   $('#pdfI').onclick=gerarPdfInsumos;
 }
@@ -466,10 +489,19 @@ function abrirInsumo(id,nomeInicial){
       <label class="f">Unidade<select class="input" id="iUn">${['KG','LT','UN'].map(u=>`<option ${d.un===u?'selected':''}>${u}</option>`).join('')}</select></label>
       <label class="f">Tipo<select class="input" id="iTipo"><option value="c" ${!prod?'selected':''}>Comprado</option><option value="p" ${prod?'selected':''}>Produzido (pré-preparo)</option></select></label>
       <label class="f">Código no estoque<input class="input" id="iCod" value="${esc(d.codigoEstoque||'')}" placeholder="ex.: 001234"></label>
+      ${prod?'':`<label class="f">Categoria<select class="input" id="iCat"><option value="">Sem categoria</option>${catsOrdenadas().map(c=>`<option value="${esc(c.id)}" ${d.categoriaId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>`}
       ${prod?`<label class="f" style="grid-column:span 2">Ficha de origem<select class="input" id="iFicha">${fichasPrep.map(f=>`<option value="${esc(f.id)}" ${d.fichaId===f.id?'selected':''}>${esc(f.nome)}</option>`).join('')}</select></label>`
       :`<label class="f">Preço por ${esc(d.un)}<input class="input num" id="iPreco" inputmode="decimal" value="${d.preco!=null?nIn(d.preco):''}"></label>
         <label class="f">Fornecedor<input class="input" id="iForn" value="${esc(d.fornecedor||'')}"></label>`}
     </div>
+    ${prod?'':(()=>{const ps=(d.produtoIds||[]).map(id=>S.prods.get(id)).filter(Boolean);const p0=ps[0];
+      const sug=sugerirEm(d.nome,[...S.prods.values()].filter(p=>!(d.produtoIds||[]).includes(p.id)).map(p=>({...p,nome:p.name})),3);
+      return `<div class="panel"><h3>Produto no estoque</h3><p class="small muted" style="margin:4px 0 10px">Ligado ao produto do estoque, o preço fica unificado: quando o custo muda no estoque, a ficha atualiza; quando o preço muda aqui, o custo do produto no estoque também muda.</p>
+      <div class="row">${ps.map(p=>`<span class="chip acc">🔗 ${esc(p.name)} <span class="small">(${esc(p.unit||'un')} · ${brl(Number(p.cost)||0)})</span> <button class="x" data-unlink="${esc(p.id)}" aria-label="Desligar">×</button></span>`).join('')||'<span class="muted small">Sem ligação.</span>'}</div>
+      <div class="fgrid" style="margin-top:10px"><label class="f">Ligar a um produto<select class="input" id="iLink"><option value="">— escolher —</option>${sug.length?`<optgroup label="Sugestões pelo nome">${sug.map(x=>`<option value="${esc(x.i.id)}">${esc(x.i.name)}</option>`).join('')}</optgroup>`:''}<optgroup label="Todos os produtos">${[...S.prods.values()].filter(p=>!(d.produtoIds||[]).includes(p.id)).sort((a,b)=>(a.name||'').localeCompare(b.name||'','pt-BR')).map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup></select></label>
+      ${p0?`<label class="f">1 ${esc(p0.unit||'un')} do estoque = quantos ${esc(d.un)}?<input class="input num" id="iConv" inputmode="decimal" value="${Number(d.conv)>0?nIn(d.conv):''}" placeholder="ex.: 1"></label>`:''}</div>
+      ${p0&&!(Number(d.conv)>0)?`<p class="note" style="margin:10px 0 0">Defina a conversão para o preço sincronizar. Ex.: se o estoque conta o pé de alface em <b>un</b> e a ficha usa <b>kg</b>, informe quanto pesa 1 unidade (0,3). Se for a mesma unidade, informe 1.</p>`:''}
+      ${p0&&Number(d.conv)>0?`<p class="small muted" style="margin:8px 0 0">Preço equivalente pelo estoque: <b>${brl((Number(p0.cost)||0)/Number(d.conv))}</b> por ${esc(d.un)}.</p>`:''}</div>`;})()}
     ${!prod&&orig&&orig.precoMedio?`<p class="small muted" style="margin:0">Média ponderada das compras dos últimos 90 dias: <b>${brl(orig.precoMedio)}</b>${S.config.regraPreco==='medio'?' (é este o valor usado nas fichas)':''}.</p>`:''}
     <div class="panel"><h3>Fator de correção</h3><p class="small muted" style="margin:4px 0 10px">${prod?'Pré-preparo: o FC vem da planilha e é mantido como informado. Ex.: FC 0,95 = 95% aproveitado, 5% de perda.':'Quanto sobra para uso depois de limpar, descascar ou desossar. FC = peso líquido ÷ peso bruto. Ex.: FC 0,95 = 95% aproveitado, 5% de perda.'}</p>
       <div class="fgrid"><label class="f">Peso bruto<input class="input num" id="iBruto" inputmode="decimal" value="${nIn(d.pesoBruto)}"></label>
@@ -492,13 +524,18 @@ function abrirInsumo(id,nomeInicial){
     <div class="db" id="dBody">${body()}</div>
     <div class="df">${orig&&!usoDireto(orig.id).length?`<button class="btn danger" id="iDel">Excluir</button>`:''}<span class="grow"></span><button class="btn" data-close>Cancelar</button><button class="btn primary" id="iSave" ${S.canWrite?'':'disabled'}>Salvar</button></div></div>`;
   function grab(){const g=s=>$(s);d.nome=fold(g('#iNome').value);d.un=g('#iUn').value;d.codigoEstoque=g('#iCod').value.trim();
+    if(g('#iCat'))d.categoriaId=g('#iCat').value||null;
+    if(g('#iConv')){const cv=parseNum(g('#iConv').value);d.conv=isFinite(cv)&&cv>0?cv:null;}
+    if(g('#iLink')&&g('#iLink').value){d.produtoIds=[...(d.produtoIds||[]),g('#iLink').value];if(!(Number(d.conv)>0)){const p=S.prods.get(g('#iLink').value);const pu=String(p&&p.unit||'').toLowerCase();if((pu==='kg'&&d.un==='KG')||((pu==='l'||pu==='lt')&&d.un==='LT')||(pu==='un'&&d.un==='UN'))d.conv=1;}}
+    d.vinculoNome=(d.produtoIds||[]).map(id=>S.prods.get(id)).filter(Boolean).map(p=>p.name).join(' · ')||null;
     d.pesoBruto=parseNum(g('#iBruto').value)||0;d.pesoLiquido=parseNum(g('#iLiq').value)||0;
     if(g('#iTipo').value==='p'){d.fichaId=g('#iFicha')?g('#iFicha').value:(fichasPrep[0]&&fichasPrep[0].id)||null;}
     else{d.fichaId=null;if(g('#iPreco')){const p=parseNum(g('#iPreco').value);d.preco=isFinite(p)?p:null;}if(g('#iForn'))d.fornecedor=g('#iForn').value.trim();}}
   function rebind(){const ae=document.activeElement&&document.activeElement.id;const pos=document.activeElement&&document.activeElement.selectionStart;
     $('#dBody').innerHTML=body();bindBody();if(ae&&$('#'+ae)){const el=$('#'+ae);el.focus();try{el.setSelectionRange(pos,pos)}catch(e){}}loadHist();}
   function bindBody(){
-    ['#iUn','#iTipo','#iFicha'].forEach(s=>{const e=$(s);if(e)e.onchange=()=>{grab();rebind();};});
+    ['#iUn','#iTipo','#iFicha','#iLink','#iConv'].forEach(s=>{const e=$(s);if(e)e.onchange=()=>{grab();rebind();};});
+    document.querySelectorAll('#dBody [data-unlink]').forEach(b=>b.onclick=()=>{grab();d.produtoIds=(d.produtoIds||[]).filter(x=>x!==b.dataset.unlink);if(!d.produtoIds.length){d.produtoIds=null;d.conv=null;}d.vinculoNome=(d.produtoIds||[]).map(id=>S.prods.get(id)).filter(Boolean).map(p=>p.name).join(' · ')||null;rebind();});
     ['#iBruto','#iLiq'].forEach(s=>{$(s).onchange=()=>{grab();rebind();};});
     const ip=$('#iPreco');if(ip){let t;ip.oninput=()=>{clearTimeout(t);t=setTimeout(()=>{grab();rebind();},350);};}
     const fx=$('#iFix');if(fx)fx.onclick=()=>{grab();d.pesoLiquido=d.pesoBruto;rebind();};
@@ -981,6 +1018,7 @@ function vPend(m,P){
       <span class="row">${sg.map(s=>`<button class="btn sm" data-link="${esc(f.id)}|${ix}|${esc(s.i.id)}">usar ${esc(s.i.nome)}</button>`).join('')}<button class="btn sm" data-newins="${esc(it.nome)}">cadastrar</button></span></div>`;}).join('');
     if(p.k==='prepfc')return p.lista.map(i=>`<div class="li"><span class="t"><a href="#" data-ins="${esc(i.id)}">${esc(i.nome)}</a> <span class="small muted">FC ${n2(fcOf(i))}</span></span><button class="btn sm" data-fc1="${esc(i.id)}">Usar FC 1</button></div>`).join('');
     if(p.k==='fcruim')return p.lista.map(i=>`<div class="li"><span class="t"><a href="#" data-ins="${esc(i.id)}">${esc(i.nome)}</a> <span class="small muted">bruto ${n3(i.pesoBruto)} · líquido ${n3(i.pesoLiquido)}</span></span>${i.pesoLiquido>1?`<button class="btn sm" data-fc100="${esc(i.id)}">Corrigir para ${n3(i.pesoLiquido/100)}</button>`:''}</div>`).join('');
+    if(p.k==='semconv'||p.k==='semlig')return `<div class="row" style="padding-top:6px">${p.lista.map(i=>`<button class="btn sm" data-ins="${esc(i.id)}">${esc(i.nome)}${p.k==='semconv'?' · '+esc(i.vinculoNome||''):''}</button>`).join('')}</div>`;
     if(p.k==='sempreco'||p.k==='velhos')return `<div class="row" style="padding-top:6px">${p.lista.slice(0,p.k==='velhos'?24:99).map(i=>`<button class="btn sm" data-ins="${esc(i.id)}">${esc(i.nome)}</button>`).join('')}${p.lista.length>24&&p.k==='velhos'?`<span class="muted small">+ ${p.lista.length-24}</span>`:''}</div>`;
     if(p.k==='semrend'||p.k==='vazias')return `<div class="row" style="padding-top:6px">${p.lista.map(f=>`<button class="btn sm" data-fic="${esc(f.id)}">${esc(f.nome)}</button>`).join('')}</div>`;
     if(p.k==='acima')return p.lista.map(x=>`<div class="li"><span class="t"><a href="#" data-fic="${esc(x.f.id)}">${esc(x.f.nome)}</a></span><span class="num small">${x.p.real!=null?'salão '+pct(x.p.real):''} ${x.p.realI!=null?'iFood '+pct(x.p.realI):''} vs ${pct(x.p.cmv,0)}</span></div>`).join('');
@@ -1121,6 +1159,8 @@ async function boot(){
   watch('insumos',s=>{S.insumos=new Map(s.docs.map(d=>[d.id,{...d.data(),id:d.id}]));S.loaded.insumos=true;});
   watch('fichas',s=>{S.fichas=new Map(s.docs.map(d=>[d.id,{...d.data(),id:d.id}]));S.loaded.fichas=true;});
   watch('vinculos',s=>{S.vinculos=new Map(s.docs.map(d=>[d.id,d.data()]));});
+  SB.db.collection('categories').onSnapshot(s=>{S.cats=new Map(s.docs.map(d=>[d.id,{...d.data(),id:d.id}]));sched();},()=>{});
+  SB.db.collection('products').onSnapshot(s=>{S.prods=new Map(s.docs.map(d=>[d.id,{...d.data(),id:d.id}]));sched();},()=>{});
   watch('notas',s=>{S.notas=s.docs.map(d=>d.data());});
   watch('concorrentes',s=>{S.concorrentes=new Map(s.docs.map(d=>[d.id,{...d.data(),id:d.id}]));});
   db.doc('config/geral').onSnapshot(s=>{if(s.exists){const c=s.data();S.config={...S.config,...c,perfil:{...DEF_PERFIL,...(c.perfil||{})}};}sched();},()=>{});
