@@ -480,6 +480,9 @@ function abrirInsumo(id,nomeInicial){
   const L=$('#layer');
   const fichasPrep=[...S.fichas.values()].filter(f=>f.categoria==='Pré-preparo').sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
   const uso=orig?usoDireto(orig.id):[];
+  function impHtml(imp){return imp.length?`<div class="panel"><h3>Impacto do novo preço</h3><div class="tbl-wrap" style="margin-top:8px"><table><thead><tr><th>Ficha</th><th class="r">Custo atual</th><th class="r">Novo custo</th><th class="r">Var.</th></tr></thead><tbody>
+      ${imp.slice(0,30).map(x=>`<tr><td>${esc(x.f.nome)} <span class="small muted">${esc(x.f.categoria)}</span></td><td class="r num">${brl(x.a.un)}</td><td class="r num">${brl(x.b.un)}</td><td class="r num ${x.b.total>x.a.total?'up':'down'}">${pct((x.b.total-x.a.total)/(x.a.total||1))}</td></tr>`).join('')}</tbody></table></div>
+      ${imp.length>30?`<p class="small muted">+ ${imp.length-30} fichas</p>`:''}</div>`:'';}
   function body(){
     const prod=!!d.fichaId;const fc=fcOf(d);
     const novoP=parseNum($('#iPreco')?.value);
@@ -512,9 +515,7 @@ function abrirInsumo(id,nomeInicial){
       ${prod&&Math.abs(fc-1)>1e-4?`<p class="note" style="margin:10px 0 0">FC ${n2(fc)} = ${pct(fc,0)} aproveitado (${pct(1-fc,0)} de perda). Valor mantido como informado.</p>`:''}
       ${(!prod&&fc>1.0001)?`<p class="note" style="margin:10px 0 0">Peso líquido maior que o bruto. Confira se não foi digitado ${n3(d.pesoLiquido)} no lugar de ${n3(d.pesoLiquido/100)}.</p>`:''}
     </div>
-    ${imp.length?`<div class="panel"><h3>Impacto do novo preço</h3><div class="tbl-wrap" style="margin-top:8px"><table><thead><tr><th>Ficha</th><th class="r">Custo atual</th><th class="r">Novo custo</th><th class="r">Var.</th></tr></thead><tbody>
-      ${imp.slice(0,30).map(x=>`<tr><td>${esc(x.f.nome)} <span class="small muted">${esc(x.f.categoria)}</span></td><td class="r num">${brl(x.a.un)}</td><td class="r num">${brl(x.b.un)}</td><td class="r num ${x.b.total>x.a.total?'up':'down'}">${pct((x.b.total-x.a.total)/(x.a.total||1))}</td></tr>`).join('')}</tbody></table></div>
-      ${imp.length>30?`<p class="small muted">+ ${imp.length-30} fichas</p>`:''}</div>`:''}
+    <div id="iImp">${impHtml(imp)}</div>
     ${orig?`<div class="panel"><h3>Usado em ${uso.length} ficha(s)</h3><div class="row" style="margin-top:8px">${uso.map(f=>`<button class="btn sm" data-fic="${esc(f.id)}">${esc(f.nome)}</button>`).join('')||'<span class="muted">Nenhuma ficha usa este insumo.</span>'}</div></div>`:''}
     ${orig&&!prod?`<div class="panel"><h3>Histórico de preço</h3><div id="hist" class="list" style="margin-top:6px"><span class="muted small">Carregando…</span></div>
       ${(d.codigos||[]).length?`<p class="small muted">Vinculado na NF como: ${(d.codigos||[]).map(esc).join(' · ')}</p>`:''}</div>`:''}
@@ -538,7 +539,9 @@ function abrirInsumo(id,nomeInicial){
     ['#iUn','#iTipo','#iFicha','#iLink','#iConv'].forEach(s=>{const e=$(s);if(e)e.onchange=()=>{grab();rebind();};});
     document.querySelectorAll('#dBody [data-unlink]').forEach(b=>b.onclick=()=>{grab();d.produtoIds=(d.produtoIds||[]).filter(x=>x!==b.dataset.unlink);if(!d.produtoIds.length){d.produtoIds=null;d.conv=null;}d.vinculoNome=(d.produtoIds||[]).map(id=>S.prods.get(id)).filter(Boolean).map(p=>p.name).join(' · ')||null;rebind();});
     ['#iBruto','#iLiq'].forEach(s=>{$(s).onchange=()=>{grab();rebind();};});
-    const ip=$('#iPreco');if(ip){let t;ip.oninput=()=>{clearTimeout(t);t=setTimeout(()=>{grab();rebind();},350);};}
+    // não redesenha o formulário enquanto digita (no celular isso fechava o teclado); só atualiza o impacto
+    const ip=$('#iPreco');if(ip){let t;ip.oninput=()=>{clearTimeout(t);t=setTimeout(()=>{const v=parseNum(ip.value);const box=$('#iImp');if(!box)return;
+      box.innerHTML=impHtml(orig&&!d.fichaId&&isFinite(v)&&v>0&&Math.abs(v-(orig.preco||0))>1e-9?impacto(new Map([[orig.id,v]])):[]);},350);};}
     const fx=$('#iFix');if(fx)fx.onclick=()=>{grab();d.pesoLiquido=d.pesoBruto;rebind();};
   }
   async function loadHist(){const h=$('#hist');if(!h||!orig)return;const ent=await lerHistorico(orig.id);
