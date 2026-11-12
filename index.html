@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261112135933">
+<meta name="app-build" content="20261112142808">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -423,6 +423,11 @@
 .porc-box { border:1px solid var(--border); border-radius:12px; padding:12px; margin-top:8px; background:var(--surface); }
 .porc-res { font-size:13px; line-height:1.55; background:var(--surface-2); border-radius:10px; padding:10px 12px; }
 .porc-total { font-size:15px; font-weight:800; color:var(--accent); margin-top:4px; } .porc-total small { font-weight:600; color:var(--text-2); }
+.porc-split { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
+.porc-split > div { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 10px; display:flex; flex-direction:column; }
+.porc-split > div.on { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+.porc-split span { font-size:11.5px; color:var(--text-2); font-weight:600; } .porc-split b { font-size:17px; } .porc-split small { font-size:11px; color:var(--text-2); }
+.porc-qty .qty { font-size:15px; } .porc-qty .qty.dim { opacity:.55; font-size:13px; }
 </style>
 </head>
 <body class="locked">
@@ -2848,7 +2853,9 @@ function renderProdutos() {
           (productStoresLabel(p) ? '<div class="meta" style="color:var(--accent);font-weight:600;">🏬 ' + esc(productStoresLabel(p)) + '</div>' : '') +
           (p.prodType ? '<div class="meta"><span class="kind-tag kind-' + p.prodType + '">' + (p.prodType === "produzido" ? "🔪 Produzido" : "📥 Não produzido") + '</span></div>' : '') +
           (!p.cost ? '<span class="badge-low">Sem custo</span>' : '') + '</div>' +
-          '<div class="qty-block"><div class="qty">' + fmtMoney(p.cost||0) + '</div><div class="unit">por ' + typeLabel(p.unit).toLowerCase() + '</div></div></div>';
+          (function(){ var pc = p.porcao && p.porcao.ativo ? porcaoCalc(p.porcao) : null;
+            if (!pc) return '<div class="qty-block"><div class="qty">' + fmtMoney(p.cost||0) + '</div><div class="unit">por ' + typeLabel(p.unit).toLowerCase() + '</div></div>';
+            return '<div class="qty-block porc-qty"><div class="unit">pacote</div><div class="qty' + (pc.porPacote ? '' : ' dim') + '">' + fmtMoney(pc.pacote) + '</div><div class="unit">individual</div><div class="qty' + (pc.porPacote ? ' dim' : '') + '">' + fmtMoney(pc.unitario) + '</div></div>'; })() + '</div>';
       });
     });
   }
@@ -2903,7 +2910,8 @@ function porcaoCalc(pc) {
   var raw = parseFloat(ins.cost) || 0, peso = parseFloat(pc.pesoUn) || 0, qtd = parseFloat(pc.qtd) || 0, apr = parseFloat(pc.aproveitamento) || 100, emb = parseFloat(pc.precoEmb) || 0;
   if (!(raw > 0) || !(peso > 0) || !(qtd > 0)) return null;
   var kg = peso / 1000 * qtd, carne = kg * raw / (apr / 100);
-  return { kg: kg, raw: raw, ins: ins, carne: Math.round(carne * 100) / 100, emb: emb, total: Math.round((carne + emb) * 100) / 100, unitario: Math.round((carne + emb) / qtd * 100) / 100 };
+  var pacote = Math.round((carne + emb) * 100) / 100, unitario = Math.round((carne + emb) / qtd * 100) / 100, porPacote = pc.contagem === "pacote";
+  return { kg: kg, raw: raw, ins: ins, qtd: qtd, carne: Math.round(carne * 100) / 100, emb: emb, pacote: pacote, unitario: unitario, porPacote: porPacote, total: porPacote ? pacote : unitario };
 }
 function porcaoFormHtml(p, id, dis) {
   var pc = (p && p.porcao) || {}, on = !!pc.ativo;
@@ -2921,13 +2929,17 @@ function porcaoFormHtml(p, id, dis) {
       '<div class="field"><label>Unidades por embalagem*</label><input type="number" inputmode="numeric" id="pPorcQtd" min="1" step="1" placeholder="Ex: 10" value="' + (pc.qtd || "") + '" ' + dis + '></div></div>' +
       '<div class="row2"><div class="field"><label>Aproveitamento do insumo (%)</label><input type="number" inputmode="decimal" id="pPorcApr" min="1" max="100" step="any" placeholder="100" value="' + (pc.aproveitamento || 100) + '" ' + dis + '><small style="color:var(--text-2);">Perda na limpeza. Ex.: 90% = 10% de aparas.</small></div>' +
       '<div class="field"><label>Preço da embalagem (R$)</label><input type="number" inputmode="decimal" id="pPorcEmb" min="0" step="0.01" placeholder="0,00" value="' + (pc.precoEmb || "") + '" ' + dis + '><small style="color:var(--text-2);">Saco, bandeja, etiqueta…</small></div></div>' +
+      '<div class="field"><label>O estoque conta este produto por*</label><select id="pPorcCont" ' + dis + '>' +
+        '<option value="unidade"' + (pc.contagem !== "pacote" ? ' selected' : '') + '>Unidade individual (cada porção)</option>' +
+        '<option value="pacote"' + (pc.contagem === "pacote" ? ' selected' : '') + '>Pacote fechado</option></select>' +
+        '<small style="color:var(--text-2);">Define qual custo vale no estoque e no CMV. O outro aparece só para consulta.</small></div>' +
       '<div id="pPorcRes" class="porc-res"></div></div></div>';
 }
 function porcaoRead() {
   var on = document.getElementById("pPorcOn"); if (!on || !on.checked) return null;
   var pc = { ativo: true, insumoId: document.getElementById("pPorcIns").value, pesoUn: parseFloat(document.getElementById("pPorcPeso").value) || 0,
     qtd: parseFloat(document.getElementById("pPorcQtd").value) || 0, aproveitamento: parseFloat(document.getElementById("pPorcApr").value) || 100,
-    precoEmb: parseFloat(document.getElementById("pPorcEmb").value) || 0 };
+    precoEmb: parseFloat(document.getElementById("pPorcEmb").value) || 0, contagem: document.getElementById("pPorcCont").value === "pacote" ? "pacote" : "unidade" };
   if (!pc.insumoId) { showToast("Escolha o insumo do produto porcionado"); return false; }
   if (!(pc.pesoUn > 0) || !(pc.qtd > 0)) { showToast("Informe o peso de cada unidade e quantas vêm na embalagem"); return false; }
   if (pc.aproveitamento > 100) pc.aproveitamento = 100;
@@ -2941,16 +2953,18 @@ function porcaoBind(p, id) {
     cost.readOnly = on.checked; cost.style.background = on.checked ? "var(--surface-2)" : "";
     if (!on.checked) return;
     var pc = { insumoId: document.getElementById("pPorcIns").value, pesoUn: document.getElementById("pPorcPeso").value, qtd: document.getElementById("pPorcQtd").value,
-      aproveitamento: document.getElementById("pPorcApr").value, precoEmb: document.getElementById("pPorcEmb").value };
+      aproveitamento: document.getElementById("pPorcApr").value, precoEmb: document.getElementById("pPorcEmb").value, contagem: document.getElementById("pPorcCont").value };
     var c = porcaoCalc(pc);
+    document.getElementById("pCostLabel").textContent = on.checked ? "Custo no estoque (" + (pc.contagem === "pacote" ? "por pacote" : "por unidade individual") + ") · automático" : "Custo do produto (R$ por " + typeLabel(document.getElementById("pUnit").value).toLowerCase() + ")*";
     if (!c) { res.innerHTML = pc.insumoId && !(parseFloat((products[pc.insumoId] || {}).cost) > 0) ? '⚠️ O insumo escolhido está sem custo cadastrado.' : 'Preencha o insumo, o peso e as unidades para calcular.'; return; }
     cost.value = c.total.toFixed(2);
     res.innerHTML = '<div><b>Total na embalagem:</b> ' + fmtQty(Math.round(c.kg * 1000) / 1000) + ' kg (' + fmtQty(parseFloat(pc.qtd)) + ' × ' + fmtQty(parseFloat(pc.pesoUn)) + ' g)</div>' +
       '<div>' + esc(c.ins.name) + ': ' + fmtMoney(c.raw) + '/' + esc(c.ins.unit || "kg") + (parseFloat(pc.aproveitamento) && parseFloat(pc.aproveitamento) < 100 ? ' ÷ ' + pc.aproveitamento + '% de aproveitamento' : '') + ' = <b>' + fmtMoney(c.carne) + '</b></div>' +
       (c.emb ? '<div>+ embalagem: <b>' + fmtMoney(c.emb) + '</b></div>' : '') +
-      '<div class="porc-total">Preço da embalagem: ' + fmtMoney(c.total) + ' <small>(' + fmtMoney(c.unitario) + ' por unidade)</small></div>';
+      '<div class="porc-split"><div class="' + (c.porPacote ? 'on' : '') + '"><span>Custo do pacote</span><b>' + fmtMoney(c.pacote) + '</b><small>' + fmtQty(c.qtd) + ' unidade(s)' + (c.porPacote ? ' · usado no estoque' : '') + '</small></div>' +
+        '<div class="' + (c.porPacote ? '' : 'on') + '"><span>Custo individual do produto</span><b>' + fmtMoney(c.unitario) + '</b><small>cada porção' + (c.porPacote ? '' : ' · usado no estoque') + '</small></div></div>';
   }
-  ["pPorcIns","pPorcPeso","pPorcQtd","pPorcApr","pPorcEmb"].forEach(function(k){ var el = document.getElementById(k); el.addEventListener("input", upd); el.addEventListener("change", upd); });
+  ["pPorcIns","pPorcPeso","pPorcQtd","pPorcApr","pPorcEmb","pPorcCont"].forEach(function(k){ var el = document.getElementById(k); el.addEventListener("input", upd); el.addEventListener("change", upd); });
   on.addEventListener("change", function(){
     if (on.checked) { var u = document.getElementById("pUnit"); if (u && u.value === "kg") { /* pacote é contado por unidade */ u.value = "un"; u.dispatchEvent(new Event("change")); } }
     upd();
@@ -3108,7 +3122,7 @@ function productFieldText(f, v) {
   if (f === "cost") return fmtMoney(v || 0);
   if (f === "perishable" || f === "centralOnly") return v ? "Sim" : "Não";
   if (f === "prodType") return prodKindLabel(v);
-  if (f === "porcao") { if (!v || !v.ativo) return "não calculado"; var ins = products[v.insumoId]; return (ins ? ins.name : "?") + " · " + v.qtd + " × " + v.pesoUn + " g" + (v.aproveitamento && v.aproveitamento != 100 ? " · aprov. " + v.aproveitamento + "%" : "") + (v.precoEmb ? " · emb. " + fmtMoney(v.precoEmb) : ""); }
+  if (f === "porcao") { if (!v || !v.ativo) return "não calculado"; var ins = products[v.insumoId]; return (ins ? ins.name : "?") + " · " + v.qtd + " × " + v.pesoUn + " g" + (v.aproveitamento && v.aproveitamento != 100 ? " · aprov. " + v.aproveitamento + "%" : "") + (v.precoEmb ? " · emb. " + fmtMoney(v.precoEmb) : "") + " · custo por " + (v.contagem === "pacote" ? "pacote" : "unidade"); }
   if (f === "storeIds") return v && v.length ? v.map(function(s){ return stores[s] ? stores[s].name : "?"; }).join(", ") : "Todas as lojas";
   if (v === null || v === undefined || v === "") return "—";
   return String(v);
@@ -6388,7 +6402,7 @@ function renderPrecos() {
       var w = weightLabel(p);
       var info = [];
       if (p.previousCost !== undefined && p.previousCost !== null && p.costUpdatedAt) info.push("antes " + fmtMoney(p.previousCost));
-      if (p.porcao && p.porcao.ativo) info.push("🥩 calculado pela embalagem: " + esc(productFieldText("porcao", p.porcao)));
+      if (p.porcao && p.porcao.ativo) { var pcc = porcaoCalc(p.porcao); info.push("🥩 automático pela embalagem" + (pcc ? ": pacote " + fmtMoney(pcc.pacote) + " · individual " + fmtMoney(pcc.unitario) : "")); }
       if (p.costUpdatedAt) info.push("atualizado " + fmtDate(p.costUpdatedAt) + (p.costUpdatedByName ? " por " + esc(/^Cálculo|^Ficha/.test(p.costUpdatedByName) ? p.costUpdatedByName : p.costUpdatedByName.split(" ")[0]) : ""));
       html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">' +
         '<div style="flex:1;min-width:0;">' +
