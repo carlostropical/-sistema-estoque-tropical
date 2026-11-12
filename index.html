@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261111205206">
+<meta name="app-build" content="20261112090859">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -643,6 +643,7 @@ function buildDrawer() {
     html += '<div class="item' + (currentRoute===r?" active":"") + '" data-route="' + r + '"' + (sub?' style="padding-left:38px;font-size:14px;"':'') + '>' + (sub?'↳ ':'') + ROUTE_ICONS[r] + ' ' + ROUTES[r].title + '</div>';
   });
   if (canSeeCmv()) html += '<div class="item' + (currentRoute==="pdv"?" active":"") + '" data-route="pdv">🔌 Integração PDV</div>';
+  if (["Diretoria","Gerência"].indexOf(currentRole()) !== -1) html += '<a class="item" href="fichas.html" style="display:block;text-decoration:none;color:inherit;">📑 Fichas técnicas</a>';
   html += '<h3>Acesso restrito</h3>';
   html += '<div class="item' + (currentRoute==="diretoria"?" active":"") + '" data-route="diretoria">🔒 Diretoria</div>';
   html += '<div class="item item-logout" data-logout="1">🚪 Sair do sistema</div>';

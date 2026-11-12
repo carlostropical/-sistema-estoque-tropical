@@ -103,7 +103,9 @@
       var p = session ? authCall("logout", "POST", {}, true).catch(function () {}) : Promise.resolve();
       return p.then(function () { saveSession(null); stopPolling(); });
     },
-    onSignedOut: function (fn) { listeners.signedOut.push(fn); }
+    onSignedOut: function (fn) { listeners.signedOut.push(fn); },
+    // token atual (renovado se preciso), para chamadas diretas ao Storage
+    token: function () { return ensureFresh().then(function (s) { return s.access_token; }); }
   };
 
   // ---------------- REST ----------------
@@ -326,5 +328,5 @@
 
   loadSession();
   var configured = !!(BASE && KEY) && BASE.indexOf("SEU-PROJETO") < 0 && KEY.indexOf("COLE-AQUI") < 0;
-  window.SB = { auth: auth, db: db, configured: configured, loginToEmail: loginToEmail, domain: DOMAIN };
+  window.SB = { auth: auth, db: db, configured: configured, loginToEmail: loginToEmail, domain: DOMAIN, base: BASE, key: KEY };
 })();
