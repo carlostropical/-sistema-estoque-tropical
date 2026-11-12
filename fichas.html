@@ -1113,7 +1113,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#layer').innerHT
 /* ============ inicialização ============ */
 async function boot(){
   const db=await claude.use('db');S.db=db;renderSync();
-  if(!db){$('#main').innerHTML=`<div class="empty"><h2>Acesso restrito</h2><p>As fichas técnicas mostram custos e ficam disponíveis só para a Gerência e a Diretoria. <a href="index.html">Voltar ao sistema</a></p></div>`;return;}
+  if(!db){$('#main').innerHTML=`<div class="empty"><h2>Acesso restrito</h2><p>As fichas técnicas ficam disponíveis somente para a Diretoria. <a href="index.html">Voltar ao sistema</a></p></div>`;return;}
   claude.use('user').then(async u=>{S.user=u;if(u){try{S.uid=await u.id();}catch(e){}try{const c=await u.can('data.write');if(c===false){S.canWrite=false;renderSync();}}catch(e){}}});
   claude.use('sample').then(async s=>{S.sample=s;if(s){try{const l=await s.limits();S.sampleImg=!!(l&&l.images);}catch(e){}}});
   let t=null;const sched=()=>{clearTimeout(t);t=setTimeout(()=>{if(!$('#layer').innerHTML||UI.tab)render();},40);};

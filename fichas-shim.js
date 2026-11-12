@@ -1,10 +1,10 @@
 /* Fichas técnicas dentro do sistema de estoque.
  * Oferece ao app de fichas a mesma interface que ele usava (claude.use('db'|'user'|'assets'|'downloads')),
  * agora gravando no Supabase do sistema (coleções ft_*) com o login do funcionário.
- * Acesso: somente Gerência e Diretoria. */
+ * Acesso: somente Diretoria. */
 (function () {
   "use strict";
-  var MANAGERS = ["Diretoria", "Gerência"];
+  var MANAGERS = ["Diretoria"];
   var user = window.SB && SB.auth.user();
   if (!window.SB || !SB.configured || !user) { location.replace("index.html"); return; }
 
@@ -94,7 +94,7 @@
     SB.db.collection("ft_fichas").limit(1).get().then(function (s) {
       if (!s.docs.length) bar(role === "Diretoria"
         ? '<b>A base de fichas ainda está vazia.</b> Toque em <b>Importar base</b> e escolha o arquivo <i>Base-Fichas-Tecnicas.json</i> para trazer os insumos, as fichas e as fotos.'
-        : '<b>A base de fichas ainda está vazia.</b> Peça para a Diretoria importar a base.');
+        : '');
     });
   });
 
