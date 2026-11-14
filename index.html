@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261112142808">
+<meta name="app-build" content="20261113221949">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -6939,7 +6939,8 @@ init();
 <div id="updBar" style="display:none;position:fixed;left:12px;right:12px;bottom:14px;z-index:9999;background:#1f6f43;color:#fff;border-radius:14px;padding:13px 16px;font:600 14.5px/1.3 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer;text-align:center;">🔄 Saiu uma versão nova do sistema. <u>Toque aqui para atualizar</u></div>
 <script>
 (function(){
-  var APP_BUILD = "20261025150432";
+  // a versão desta página vem da própria meta tag (antes era um valor fixo que ficava desatualizado)
+  var mb = document.querySelector('meta[name="app-build"]'), APP_BUILD = mb ? mb.getAttribute("content") : "";
   var bar = document.getElementById("updBar"), checking = false;
   bar.addEventListener("click", function(){ location.reload(); });
   function check() {
@@ -6947,7 +6948,7 @@ init();
     checking = true;
     fetch(location.pathname + "?v=" + Date.now(), {cache: "no-store"}).then(function(r){ return r.text(); }).then(function(t){
       var m = t.match(/<meta name="app-build" content="([0-9]+)">/);
-      if (m && m[1] !== APP_BUILD) bar.style.display = "block";
+      if (m && APP_BUILD && m[1] !== APP_BUILD) bar.style.display = "block";
     }).catch(function(){}).then(function(){ checking = false; });
   }
   document.addEventListener("visibilitychange", function(){ if (!document.hidden) check(); });
