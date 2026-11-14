@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261113222303">
+<meta name="app-build" content="20261113223247">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -437,6 +437,7 @@
 .pd-sub { font-size:11px; color:var(--text-2); } .pd-val { font-weight:800; font-size:14px; white-space:nowrap; } .pd-val small { font-weight:600; color:var(--text-2); }
 .pd-bar { height:6px; background:var(--surface-2); border-radius:4px; overflow:hidden; margin:3px 0; } .pd-bar i { display:block; height:100%; background:var(--accent); border-radius:4px; }
 .pd-miss .pd-bar i { background:var(--red); } .pd-miss .pd-val { color:var(--red); } .pd-miss .pd-n { background:var(--red-bg); color:var(--red); }
+.pd-two { text-align:right; line-height:1.15; } .pd-two span { display:block; font-size:11.5px; font-weight:600; color:var(--text-2); }
 </style>
 </head>
 <body class="locked">
@@ -2120,7 +2121,7 @@ function loadPedidosDash() {
     var nome = function(x){ return products[x.pid] ? products[x.pid].name : (x.name || "Produto"); };
     pedDash.data = {
       nOrders: orders.length,
-      top: Object.keys(top).map(function(k){ var x = top[k]; x.name = nome(x); return x; }).sort(function(a,b){ return b.qty - a.qty || b.pedidos - a.pedidos; }).slice(0, 10),
+      top: Object.keys(top).map(function(k){ var x = top[k]; x.name = nome(x); return x; }).sort(function(a,b){ return b.pedidos - a.pedidos || b.qty - a.qty; }).slice(0, 10),
       falta: Object.keys(falta).map(function(k){ var x = falta[k]; x.name = nome(x); return x; }).sort(function(a,b){ return b.falta - a.falta || b.pedidos - a.pedidos; }).slice(0, 5)
     };
     pedDash.loading = false;
@@ -2136,14 +2137,15 @@ function renderPedidosDash() {
     [7, 30, 90].map(function(n){ return '<button data-pdd="' + n + '" class="' + (pedDash.dias === n ? 'on' : '') + '">' + n + ' dias</button>'; }).join("") + '</div></div>';
   if (!d) { box.innerHTML = '<div class="chart-wrap">' + head + '<div class="loading-msg">Carregando pedidos…</div></div>'; bindPd(); return; }
   if (d.error) { box.innerHTML = '<div class="chart-wrap">' + head + '<div class="empty-state">Erro ao carregar: ' + esc(d.error) + '</div></div>'; bindPd(); return; }
-  var maxQ = d.top.length ? d.top[0].qty : 1, maxF = d.falta.length ? d.falta[0].falta : 1;
+  var maxQ = d.top.length ? d.top[0].pedidos : 1, maxF = d.falta.length ? d.falta[0].falta : 1;
   var lojas = function(x){ var l = Object.keys(x.lojas); return sc.central && l.length ? ' · ' + esc(l.length > 2 ? l.length + ' lojas' : l.join(", ")) : ''; };
   var h = '<div class="chart-wrap">' + head + '<div class="sub" style="font-size:12px;color:var(--text-2);margin:4px 0 10px;">' + d.nOrders + ' pedido(s) no período (cancelados não entram).</div>' +
-    '<div class="chart-title">🏆 Top 10 produtos mais pedidos</div>';
+    '<div class="chart-title">🏆 Top 10 produtos pedidos mais vezes</div>' +
+    '<div class="sub" style="font-size:11.5px;color:var(--text-2);margin:-4px 0 8px;">Ordem pelo número de pedidos em que o produto apareceu; ao lado, a quantidade total pedida.</div>';
   h += d.top.length ? d.top.map(function(x, i){
     return '<div class="pd-row"><span class="pd-n">' + (i + 1) + '</span><div class="pd-body"><div class="pd-name">' + esc(x.name) + '</div>' +
-      '<div class="pd-bar"><i style="width:' + (x.qty / maxQ * 100).toFixed(1) + '%"></i></div><div class="pd-sub">' + x.pedidos + ' pedido(s)' + lojas(x) + '</div></div>' +
-      '<div class="pd-val">' + fmtQty(x.qty) + ' <small>' + esc(x.unit || "un") + '</small></div></div>';
+      '<div class="pd-bar"><i style="width:' + (x.pedidos / maxQ * 100).toFixed(1) + '%"></i></div><div class="pd-sub">' + (lojas(x) ? lojas(x).replace(/^ · /, '') : '') + '</div></div>' +
+      '<div class="pd-val pd-two"><b>' + x.pedidos + '</b> <small>' + (x.pedidos === 1 ? 'pedido' : 'pedidos') + '</small><span>' + fmtQty(x.qty) + ' ' + esc(x.unit || "un") + '</span></div></div>';
   }).join("") : '<div class="empty-state" style="padding:14px;">Nenhum pedido no período.</div>';
   h += '<div class="chart-title" style="margin-top:16px;">⚠️ Top 5 itens pedidos e não entregues</div>' +
     '<div class="sub" style="font-size:11.5px;color:var(--text-2);margin:-4px 0 8px;">Pedidos com entrega até hoje: quantidade pedida menos o que foi enviado/recebido.</div>';
