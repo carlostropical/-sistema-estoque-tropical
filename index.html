@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261113221949">
+<meta name="app-build" content="20261113222303">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -428,6 +428,15 @@
 .porc-split > div.on { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
 .porc-split span { font-size:11.5px; color:var(--text-2); font-weight:600; } .porc-split b { font-size:17px; } .porc-split small { font-size:11px; color:var(--text-2); }
 .porc-qty .qty { font-size:15px; } .porc-qty .qty.dim { opacity:.55; font-size:13px; }
+.pd-head { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+.pd-per { display:flex; gap:4px; } .pd-per button { border:1px solid var(--border); background:var(--surface-2); color:var(--text); border-radius:8px; padding:4px 9px; font-size:12px; font-weight:600; cursor:pointer; }
+.pd-per button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.pd-row { display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--border); }
+.pd-row:last-child { border-bottom:0; } .pd-n { width:22px; height:22px; border-radius:50%; background:var(--surface-2); font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.pd-body { flex:1; min-width:0; } .pd-name { font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pd-sub { font-size:11px; color:var(--text-2); } .pd-val { font-weight:800; font-size:14px; white-space:nowrap; } .pd-val small { font-weight:600; color:var(--text-2); }
+.pd-bar { height:6px; background:var(--surface-2); border-radius:4px; overflow:hidden; margin:3px 0; } .pd-bar i { display:block; height:100%; background:var(--accent); border-radius:4px; }
+.pd-miss .pd-bar i { background:var(--red); } .pd-miss .pd-val { color:var(--red); } .pd-miss .pd-n { background:var(--red-bg); color:var(--red); }
 </style>
 </head>
 <body class="locked">
@@ -2053,6 +2062,7 @@ function renderPainel() {
     last7.push({label: d.toLocaleDateString("pt-BR",{weekday:"short"}).replace(".",""), value: sum});
   }
   html += '<div class="chart-wrap"><div class="chart-title">Vendas — últimos 7 dias · ' + esc(storeName) + '</div>' + barChart(last7) + '</div>';
+  html += '<div id="pedDash"></div>';
 
   if (expiringLots.length) {
     html += '<div class="chart-title" style="margin-bottom:6px;">⏰ Validades próximas</div>';
@@ -2066,6 +2076,88 @@ function renderPainel() {
   }
   content.innerHTML = html;
   var lb = document.getElementById("lowBox"); if (lb) lb.addEventListener("click", openLowStockList);
+  renderPedidosDash();
+}
+// ---------- Painel: produtos mais pedidos e pedidos não entregues ----------
+var pedDash = {dias: 30, key: "", data: null, loading: false};
+function pedDashScope() {
+  var central = stores[currentStoreId] && stores[currentStoreId].isCentral;
+  return { central: !!central, label: central ? "todas as lojas (pedidos ao Estoque Central)" : (stores[currentStoreId] ? stores[currentStoreId].name : "") };
+}
+function loadPedidosDash() {
+  var dias = pedDash.dias, since = Date.now() - dias * 86400000, sid = currentStoreId, key = sid + "|" + dias;
+  pedDash.key = key; pedDash.loading = true; pedDash.data = null;
+  Promise.all([
+    db.collection("orders").where("createdAt", ">=", since).get(),
+    db.collection("shipments").where("sentAt", ">=", since - 2 * 86400000).get()
+  ]).then(function(r){
+    if (pedDash.key !== key) return;
+    var sc = pedDashScope();
+    var orders = r[0].docs.map(function(d){ return Object.assign({id: d.id}, d.data()); }).filter(function(o){
+      if (o.status === "cancelado") return false;
+      return sc.central ? (!o.targetStoreId || (stores[o.targetStoreId] && stores[o.targetStoreId].isCentral)) : o.storeId === sid;
+    });
+    var shipByOrder = {};
+    r[1].docs.forEach(function(d){ var s = d.data(); if (s.orderId && s.status !== "cancelado") (shipByOrder[s.orderId] = shipByOrder[s.orderId] || []).push(s); });
+    var top = {}, falta = {}, hoje = todayStr();
+    orders.forEach(function(o){
+      var entregue = {};
+      (shipByOrder[o.id] || []).forEach(function(s){ (s.items || []).forEach(function(it){
+        var q = (it.qtyReceived !== null && it.qtyReceived !== undefined && it.qtyReceived !== "") ? +it.qtyReceived : (+it.qtySent || 0);
+        entregue[it.productId] = (entregue[it.productId] || 0) + q; }); });
+      var vencido = !o.deliveryDate || o.deliveryDate <= hoje;
+      (o.items || []).forEach(function(it){
+        var q = +it.qty || 0; if (!(q > 0) || !it.productId) return;
+        var t = top[it.productId] = top[it.productId] || {pid: it.productId, name: it.productName, unit: it.unit, qty: 0, pedidos: 0, lojas: {}};
+        t.qty += q; t.pedidos++; t.lojas[o.storeName || o.storeId] = 1;
+        if (!vencido) return;
+        var e = entregue[it.productId] || 0; entregue[it.productId] = Math.max(0, e - q);
+        var miss = Math.max(0, q - e); if (!(miss > 0)) return;
+        var f = falta[it.productId] = falta[it.productId] || {pid: it.productId, name: it.productName, unit: it.unit, pedido: 0, falta: 0, pedidos: 0, lojas: {}, ultimo: ""};
+        f.pedido += q; f.falta += miss; f.pedidos++; f.lojas[o.storeName || o.storeId] = 1; if ((o.orderDate || "") > f.ultimo) f.ultimo = o.orderDate || "";
+      });
+    });
+    var nome = function(x){ return products[x.pid] ? products[x.pid].name : (x.name || "Produto"); };
+    pedDash.data = {
+      nOrders: orders.length,
+      top: Object.keys(top).map(function(k){ var x = top[k]; x.name = nome(x); return x; }).sort(function(a,b){ return b.qty - a.qty || b.pedidos - a.pedidos; }).slice(0, 10),
+      falta: Object.keys(falta).map(function(k){ var x = falta[k]; x.name = nome(x); return x; }).sort(function(a,b){ return b.falta - a.falta || b.pedidos - a.pedidos; }).slice(0, 5)
+    };
+    pedDash.loading = false;
+    if (currentRoute === "painel") renderPedidosDash();
+  }).catch(function(err){ pedDash.loading = false; pedDash.data = {error: errMsg(err)}; if (currentRoute === "painel") renderPedidosDash(); });
+}
+function renderPedidosDash() {
+  var box = document.getElementById("pedDash"); if (!box) return;
+  var key = currentStoreId + "|" + pedDash.dias, sc = pedDashScope();
+  if (pedDash.key !== key || (!pedDash.data && !pedDash.loading)) { box.innerHTML = '<div class="chart-wrap"><div class="loading-msg">Carregando pedidos…</div></div>'; loadPedidosDash(); return; }
+  var d = pedDash.data;
+  var head = '<div class="pd-head"><div class="chart-title" style="margin:0;">📦 Pedidos · ' + esc(sc.label) + '</div><div class="pd-per">' +
+    [7, 30, 90].map(function(n){ return '<button data-pdd="' + n + '" class="' + (pedDash.dias === n ? 'on' : '') + '">' + n + ' dias</button>'; }).join("") + '</div></div>';
+  if (!d) { box.innerHTML = '<div class="chart-wrap">' + head + '<div class="loading-msg">Carregando pedidos…</div></div>'; bindPd(); return; }
+  if (d.error) { box.innerHTML = '<div class="chart-wrap">' + head + '<div class="empty-state">Erro ao carregar: ' + esc(d.error) + '</div></div>'; bindPd(); return; }
+  var maxQ = d.top.length ? d.top[0].qty : 1, maxF = d.falta.length ? d.falta[0].falta : 1;
+  var lojas = function(x){ var l = Object.keys(x.lojas); return sc.central && l.length ? ' · ' + esc(l.length > 2 ? l.length + ' lojas' : l.join(", ")) : ''; };
+  var h = '<div class="chart-wrap">' + head + '<div class="sub" style="font-size:12px;color:var(--text-2);margin:4px 0 10px;">' + d.nOrders + ' pedido(s) no período (cancelados não entram).</div>' +
+    '<div class="chart-title">🏆 Top 10 produtos mais pedidos</div>';
+  h += d.top.length ? d.top.map(function(x, i){
+    return '<div class="pd-row"><span class="pd-n">' + (i + 1) + '</span><div class="pd-body"><div class="pd-name">' + esc(x.name) + '</div>' +
+      '<div class="pd-bar"><i style="width:' + (x.qty / maxQ * 100).toFixed(1) + '%"></i></div><div class="pd-sub">' + x.pedidos + ' pedido(s)' + lojas(x) + '</div></div>' +
+      '<div class="pd-val">' + fmtQty(x.qty) + ' <small>' + esc(x.unit || "un") + '</small></div></div>';
+  }).join("") : '<div class="empty-state" style="padding:14px;">Nenhum pedido no período.</div>';
+  h += '<div class="chart-title" style="margin-top:16px;">⚠️ Top 5 itens pedidos e não entregues</div>' +
+    '<div class="sub" style="font-size:11.5px;color:var(--text-2);margin:-4px 0 8px;">Pedidos com entrega até hoje: quantidade pedida menos o que foi enviado/recebido.</div>';
+  h += d.falta.length ? d.falta.map(function(x, i){
+    return '<div class="pd-row pd-miss"><span class="pd-n">' + (i + 1) + '</span><div class="pd-body"><div class="pd-name">' + esc(x.name) + '</div>' +
+      '<div class="pd-bar"><i style="width:' + (x.falta / maxF * 100).toFixed(1) + '%"></i></div>' +
+      '<div class="pd-sub">pedido ' + fmtQty(x.pedido) + ' · entregue ' + fmtQty(x.pedido - x.falta) + ' · ' + x.pedidos + ' pedido(s)' + lojas(x) + (x.ultimo ? ' · último ' + fmtDateShort(x.ultimo) : '') + '</div></div>' +
+      '<div class="pd-val">−' + fmtQty(x.falta) + ' <small>' + esc(x.unit || "un") + '</small></div></div>';
+  }).join("") : '<div class="empty-state" style="padding:14px;">✅ Tudo o que foi pedido foi entregue.</div>';
+  box.innerHTML = h + '</div>';
+  bindPd();
+}
+function bindPd() {
+  document.querySelectorAll("#pedDash [data-pdd]").forEach(function(b){ b.addEventListener("click", function(){ pedDash.dias = +b.getAttribute("data-pdd"); pedDash.key = ""; renderPedidosDash(); }); });
 }
 function openLowStockList() {
   var sid = currentStoreId, rows = [];
