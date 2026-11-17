@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261113223247">
+<meta name="app-build" content="20261117022211">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -438,6 +438,14 @@
 .pd-bar { height:6px; background:var(--surface-2); border-radius:4px; overflow:hidden; margin:3px 0; } .pd-bar i { display:block; height:100%; background:var(--accent); border-radius:4px; }
 .pd-miss .pd-bar i { background:var(--red); } .pd-miss .pd-val { color:var(--red); } .pd-miss .pd-n { background:var(--red-bg); color:var(--red); }
 .pd-two { text-align:right; line-height:1.15; } .pd-two span { display:block; font-size:11.5px; font-weight:600; color:var(--text-2); }
+.bell-btn { position:relative; background:none; border:0; font-size:20px; padding:4px 6px; cursor:pointer; margin-left:auto; color:inherit; }
+.bell-btn.has-late { animation: bellShake 2.4s ease-in-out infinite; }
+@keyframes bellShake { 0%,90%,100% { transform:rotate(0); } 92% { transform:rotate(14deg); } 95% { transform:rotate(-12deg); } 98% { transform:rotate(8deg); } }
+.bell-count { position:absolute; top:-2px; right:-4px; min-width:18px; height:18px; border-radius:9px; background:var(--red); color:#fff; font-size:11px; font-weight:800; line-height:18px; text-align:center; padding:0 4px; }
+.bell-btn + .store-select { margin-left:6px; }
+#alertPop { display:none; position:fixed; left:12px; right:12px; top:64px; z-index:9998; background:#24427e; color:#fff; border-radius:14px; padding:12px 14px; font-size:14px; line-height:1.4; box-shadow:0 6px 20px rgba(0,0,0,.25); cursor:pointer; }
+#alertPop.late { background:#9b2c22; }
+.task-card.late { border-left:4px solid var(--red); } .task-card.done { opacity:.6; }
 </style>
 </head>
 <body class="locked">
@@ -457,6 +465,7 @@
     <div class="topbar-row">
       <button class="menu-btn" id="menuBtn">☰</button>
       <h1 id="pageTitle">Painel</h1>
+      <button class="bell-btn" id="bellBtn" aria-label="Avisos" style="display:none;">🔔<span id="bellCount" class="bell-count" hidden></span></button>
       <select class="store-select" id="storeSelect" style="display:none;"></select>
     </div>
     <div class="op-bar" id="opBar"></div>
@@ -737,7 +746,7 @@ function renderRoute() {
     case "geladeira": return renderGeladeira();
     case "producao": return renderProducao();
     case "pdv": return renderPdv();
-    case "tarefas": return renderTarefas();
+    case "tarefas": return renderTarefasV2();
     case "produtos": return renderProdutos();
     case "precos": return renderPrecos();
     case "fornecedores": return renderFornecedores();
@@ -5174,6 +5183,274 @@ function openSaleForm() {
 // ============================================================
 // TAREFAS / CHECKLISTS
 // ============================================================
+// ============================================================
+// TAREFAS: rotinas diárias por função + tarefas avulsas por pessoa, com alertas
+// ============================================================
+var DOW = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+var tarefasTab = "hoje", routinesCache = null;
+function isManager() { var r = currentRole(); return r === "Diretoria" || r === "Gerência"; }
+function taskDue(t) { // timestamp do prazo (ou null)
+  var d = t.dueDate || t.date; if (!d) return null;
+  var hm = (t.dueTime || "23:59").split(":"), p = d.split("-");
+  return new Date(+p[0], +p[1]-1, +p[2], +hm[0] || 0, +hm[1] || 0).getTime();
+}
+function taskLate(t) { var due = taskDue(t); return t.status !== "concluida" && due !== null && Date.now() > due; }
+function taskForMe(t) {
+  if (!currentEmployeeId) return false;
+  var ids = t.assigneeIds || [];
+  if (ids.length) return ids.indexOf(currentEmployeeId) !== -1;
+  if (t.role) return t.role === currentRole();
+  return t.kind ? true : t.employeeId === currentEmployeeId;
+}
+function taskWho(t) {
+  if ((t.assigneeIds || []).length) return t.assigneeNames || (t.assigneeIds.map(function(id){ return employees[id] ? employees[id].name : ""; }).filter(Boolean).join(", ") || "pessoa definida");
+  if (t.role) return t.role;
+  return "qualquer funcionário";
+}
+function taskWhen(t) {
+  var d = t.dueDate || t.date; if (!d) return "";
+  var hoje = todayStr();
+  return (d === hoje ? "hoje" : fmtDateShort(d)) + (t.dueTime ? " às " + t.dueTime : "");
+}
+function renderTarefasV2() {
+  if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
+  var mgr = isManager(), hoje = todayStr();
+  var html = '<div class="section-head"><h2>Tarefas</h2><button class="btn btn-primary btn-sm" id="bAdd">+ Nova tarefa</button></div>' +
+    '<div class="cst-mode">' + [["hoje","📋 Hoje"],["todas","🗂️ Todas"]].concat(mgr ? [["rotinas","🔁 Rotinas"]] : []).map(function(x){
+      return '<button data-ttab="' + x[0] + '" class="' + (tarefasTab === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join("") + '</div>';
+  if (tarefasTab === "rotinas" && mgr) { content.innerHTML = html + '<div id="rtBox"><div class="loading-msg">Carregando rotinas…</div></div>'; bindTarefasTop(); renderRoutinesList(); return; }
+  var all = Object.keys(scopedTasks).map(function(id){ return Object.assign({id: id}, scopedTasks[id]); });
+  var list = all.filter(function(t){
+    if (tarefasTab === "hoje") {
+      var d = t.dueDate || t.date;
+      var relevante = t.kind ? (d ? d <= hoje : true) && (t.status !== "concluida" || d === hoje) : t.status !== "concluida";
+      return relevante && (mgr || taskForMe(t));
+    }
+    return mgr || taskForMe(t) || t.employeeId === currentEmployeeId;
+  }).sort(function(a, b){
+    var la = taskLate(a) ? 0 : 1, lb = taskLate(b) ? 0 : 1; if (la !== lb) return la - lb;
+    var ca = a.status === "concluida" ? 1 : 0, cb = b.status === "concluida" ? 1 : 0; if (ca !== cb) return ca - cb;
+    return (taskDue(a) || 9e15) - (taskDue(b) || 9e15);
+  });
+  if (!list.length) html += '<div class="empty-state"><div class="emoji">✅</div>' + (tarefasTab === "hoje" ? 'Nenhuma tarefa para hoje.' : 'Nenhuma tarefa.') + '</div>';
+  list.forEach(function(t){
+    var done = (t.items || []).filter(function(i){ return i.done; }).length, total = (t.items || []).length;
+    var late = taskLate(t), concl = t.status === "concluida";
+    html += '<div class="card task-card' + (late ? ' late' : '') + (concl ? ' done' : '') + '" data-open="' + t.id + '"><div class="info"><div class="name">' + (t.kind === "rotina" ? '🔁 ' : '') + esc(t.title) + '</div>' +
+      '<div class="meta">' + (taskWhen(t) ? '⏰ ' + esc(taskWhen(t)) + ' · ' : '') + '👤 ' + esc(taskWho(t)) + (total ? ' · ' + done + '/' + total + ' itens' : '') + (concl && t.doneByName ? ' · feita por ' + esc(t.doneByName.split(" ")[0]) : '') + '</div></div>' +
+      '<span class="badge-low status-' + (concl ? 'concluida' : 'pendente') + '"' + (late ? ' style="background:var(--red-bg);color:var(--red);"' : '') + '>' + (concl ? 'Feita' : late ? 'Atrasada' : 'Pendente') + '</span></div>';
+  });
+  content.innerHTML = html;
+  bindTarefasTop();
+  content.querySelectorAll("[data-open]").forEach(function(c){ c.addEventListener("click", function(){ openTaskDetail(c.getAttribute("data-open")); }); });
+}
+function bindTarefasTop() {
+  document.getElementById("bAdd").addEventListener("click", function(){ tarefasTab === "rotinas" ? openRoutineForm(null) : openTaskFormV2(); });
+  content.querySelectorAll("[data-ttab]").forEach(function(b){ b.addEventListener("click", function(){ tarefasTab = b.getAttribute("data-ttab"); renderTarefasV2(); }); });
+}
+function employeesOfStore(sid) {
+  return Object.keys(employees).filter(function(id){ var e = employees[id]; return e.active !== false && (e.role === "Diretoria" || e.role === "Gerência" || (e.storeIds || []).indexOf(sid) !== -1); })
+    .sort(function(a, b){ return (employees[a].name || "").localeCompare(employees[b].name || "", "pt-BR"); });
+}
+function openTaskFormV2() {
+  if (!requireOperator()) return;
+  taskDraftItems = [""];
+  var emps = employeesOfStore(currentStoreId);
+  var html = '<h2>Nova tarefa</h2><div class="sub">' + esc(stores[currentStoreId].name) + '</div>' +
+    '<div class="field"><label>O que fazer*</label><input type="text" id="tTitle" placeholder="Ex: Limpar a câmara fria"></div>' +
+    '<div class="field"><label>Responsável</label><select id="tWho"><option value="">Qualquer funcionário da loja</option>' +
+      '<optgroup label="Pessoa">' + emps.map(function(id){ return '<option value="e:' + id + '">' + esc(employees[id].name) + ' · ' + esc(employees[id].role || "") + '</option>'; }).join("") + '</optgroup>' +
+      '<optgroup label="Função">' + ROLES.map(function(r){ return '<option value="r:' + esc(r) + '">' + esc(r) + '</option>'; }).join("") + '</optgroup></select></div>' +
+    '<div class="row2"><div class="field"><label>Prazo (dia)</label><input type="date" id="tDate" value="' + todayStr() + '"></div><div class="field"><label>Até que horas</label><input type="time" id="tTime" value=""></div></div>' +
+    '<div class="field"><label>Itens do checklist (opcional)</label><div id="tItems"></div><button class="link-btn" id="bAddItem">+ Adicionar item</button></div>' +
+    '<button class="btn btn-primary" id="bSave">Criar tarefa</button><button class="btn btn-secondary" id="bCancel">Cancelar</button>';
+  openSheet(html);
+  renderTaskItemInputs();
+  document.getElementById("bAddItem").addEventListener("click", function(){ taskDraftItems.push(""); renderTaskItemInputs(); });
+  document.getElementById("bCancel").addEventListener("click", closeSheet);
+  document.getElementById("bSave").addEventListener("click", function(){
+    var title = document.getElementById("tTitle").value.trim(); if (!title) { showToast("Informe o que fazer"); return; }
+    var who = document.getElementById("tWho").value, d = document.getElementById("tDate").value, tm = document.getElementById("tTime").value;
+    var items = taskDraftItems.filter(function(t){ return t.trim(); }).map(function(t, i){ return {id: "i" + i + "_" + Date.now(), text: t.trim(), done: false}; });
+    var data = {kind: "avulsa", storeId: currentStoreId, storeName: stores[currentStoreId].name, title: title, items: items, status: "pendente",
+      dueDate: d || "", dueTime: tm || "", role: who.indexOf("r:") === 0 ? who.slice(2) : "", assigneeIds: who.indexOf("e:") === 0 ? [who.slice(2)] : [],
+      assigneeNames: who.indexOf("e:") === 0 ? (employees[who.slice(2)] || {}).name || "" : "",
+      employeeId: currentEmployeeId, employeeName: currentEmployeeName, createdAt: Date.now()};
+    var btn = this; btn.disabled = true; btn.textContent = "Criando…";
+    db.collection("tasks").add(data).then(function(){ closeSheet(); showToast("Tarefa criada"); refreshAlerts(); })
+      .catch(function(err){ showToast("Erro: " + errMsg(err)); btn.disabled = false; btn.textContent = "Criar tarefa"; });
+  });
+}
+function renderRoutinesList() {
+  db.collection("routines").get().then(function(qs){
+    routinesCache = {}; qs.docs.forEach(function(d){ routinesCache[d.id] = Object.assign({id: d.id}, d.data()); });
+    var box = document.getElementById("rtBox"); if (!box) return;
+    var ids = Object.keys(routinesCache).sort(function(a, b){ return (routinesCache[a].time || "").localeCompare(routinesCache[b].time || ""); });
+    var h = '<div class="item-row" style="margin-bottom:10px;font-size:12.5px;">🔁 Rotinas viram tarefas todos os dias nos horários e lojas escolhidos. Quem for responsável recebe o aviso no 🔔; se atrasar, a Gerência e a Diretoria também veem.</div>';
+    if (!ids.length) h += '<div class="empty-state"><div class="emoji">🔁</div>Nenhuma rotina. Ex.: "Contagem de geladeira" às 10:00 em todas as lojas.</div>';
+    ids.forEach(function(id){
+      var r = routinesCache[id], lojas = r.storeId === "*" ? "Todas as lojas" : (stores[r.storeId] ? stores[r.storeId].name : "Loja");
+      var dias = (r.days || []).length === 7 || !r.days ? "todos os dias" : (r.days || []).map(function(x){ return DOW[x]; }).join(", ");
+      h += '<div class="card" data-rt="' + id + '" style="' + (r.active === false ? 'opacity:.55;' : '') + '"><div class="info"><div class="name">🔁 ' + esc(r.title) + '</div>' +
+        '<div class="meta">⏰ ' + esc(r.time || "sem horário") + ' · ' + esc(dias) + ' · 🏬 ' + esc(lojas) + ' · 👤 ' + esc(r.employeeNames || r.role || "qualquer funcionário") + '</div></div>' +
+        '<span class="badge-low">' + (r.active === false ? 'Pausada' : 'Ativa') + '</span></div>';
+    });
+    box.innerHTML = h;
+    box.querySelectorAll("[data-rt]").forEach(function(c){ c.addEventListener("click", function(){ openRoutineForm(c.getAttribute("data-rt")); }); });
+  }).catch(function(err){ var box = document.getElementById("rtBox"); if (box) box.innerHTML = '<div class="empty-state">Erro: ' + esc(errMsg(err)) + '</div>'; });
+}
+function callRpc(fn, body) {
+  return SB.auth.token().then(function(tk){
+    return fetch(SB.base + "/rest/v1/rpc/" + fn, {method: "POST", headers: {"apikey": SB.key, "Authorization": "Bearer " + tk, "Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  }).then(function(r){ if (!r.ok) return r.text().then(function(t){ throw new Error(t); }); return r.json(); });
+}
+function openRoutineForm(id) {
+  if (!isManager()) { showToast("Somente Gerência e Diretoria"); return; }
+  var r = id ? routinesCache[id] : {title: "", storeId: "*", role: "", employeeIds: [], time: "10:00", days: [0,1,2,3,4,5,6], items: [], active: true};
+  taskDraftItems = (r.items || []).length ? r.items.slice() : [""];
+  var days = (r.days || [0,1,2,3,4,5,6]).slice();
+  function empOpts(sid) {
+    var emps = sid === "*" ? Object.keys(employees).filter(function(k){ return employees[k].active !== false; }).sort(function(a, b){ return (employees[a].name || "").localeCompare(employees[b].name || "", "pt-BR"); }) : employeesOfStore(sid);
+    var cur = (r.employeeIds || [])[0] || "";
+    return '<option value="">— ninguém específico —</option>' + emps.map(function(k){ return '<option value="' + k + '"' + (cur === k ? ' selected' : '') + '>' + esc(employees[k].name) + ' · ' + esc(employees[k].role || "") + '</option>'; }).join("");
+  }
+  var html = '<h2>' + (id ? 'Editar rotina' : 'Nova rotina') + '</h2>' +
+    '<div class="field"><label>Tarefa*</label><input type="text" id="rtTitle" value="' + esc(r.title) + '" placeholder="Ex: Contagem de geladeira (almoço)"></div>' +
+    '<div class="row2"><div class="field"><label>Horário limite*</label><input type="time" id="rtTime" value="' + esc(r.time || "") + '"></div>' +
+    '<div class="field"><label>Loja</label><select id="rtStore"><option value="*"' + (r.storeId === "*" ? ' selected' : '') + '>Todas as lojas</option>' +
+      storeOrder.map(function(sid){ return '<option value="' + sid + '"' + (r.storeId === sid ? ' selected' : '') + '>' + esc(stores[sid].name) + '</option>'; }).join("") + '</select></div></div>' +
+    '<div class="field"><label>Dias</label><div class="chips" id="rtDays">' + DOW.map(function(d, i){ return '<div class="chip' + (days.indexOf(i) !== -1 ? ' selected' : '') + '" data-dw="' + i + '">' + d + '</div>'; }).join("") + '</div></div>' +
+    '<div class="row2"><div class="field"><label>Função responsável</label><select id="rtRole"><option value="">Qualquer função</option>' + ROLES.map(function(x){ return '<option' + (r.role === x ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join("") + '</select></div>' +
+    '<div class="field"><label>ou pessoa específica</label><select id="rtEmp">' + empOpts(r.storeId) + '</select></div></div>' +
+    '<div class="field"><label>Itens do checklist (opcional)</label><div id="tItems"></div><button class="link-btn" id="bAddItem">+ Adicionar item</button></div>' +
+    '<label class="central-opt" style="margin:6px 0 12px;"><input type="checkbox" id="rtActive"' + (r.active !== false ? ' checked' : '') + '> <span><b>Rotina ativa</b><br><small>Desmarque para pausar sem apagar.</small></span></label>' +
+    '<button class="btn btn-primary" id="rtSave">Salvar rotina</button>' + (id ? '<button class="btn btn-secondary" id="rtDel" style="color:var(--red);">Excluir rotina</button>' : '') + '<button class="btn btn-secondary" id="bCancel">Cancelar</button>';
+  openSheet(html);
+  renderTaskItemInputs();
+  document.getElementById("bAddItem").addEventListener("click", function(){ taskDraftItems.push(""); renderTaskItemInputs(); });
+  document.getElementById("bCancel").addEventListener("click", closeSheet);
+  document.getElementById("rtStore").addEventListener("change", function(){ document.getElementById("rtEmp").innerHTML = empOpts(this.value); });
+  sheet.querySelectorAll("[data-dw]").forEach(function(c){ c.addEventListener("click", function(){
+    var i = +c.getAttribute("data-dw"), k = days.indexOf(i); if (k === -1) days.push(i); else days.splice(k, 1); c.classList.toggle("selected", k === -1); }); });
+  if (id) document.getElementById("rtDel").addEventListener("click", function(){
+    if (!confirm("Excluir a rotina? As tarefas já criadas continuam.")) return;
+    db.doc("routines/" + id).delete().then(function(){ closeSheet(); showToast("Rotina excluída"); renderTarefasV2(); }).catch(function(err){ showToast("Erro: " + errMsg(err)); });
+  });
+  document.getElementById("rtSave").addEventListener("click", function(){
+    var title = document.getElementById("rtTitle").value.trim(), tm = document.getElementById("rtTime").value;
+    if (!title || !tm) { showToast("Informe a tarefa e o horário"); return; }
+    if (!days.length) { showToast("Escolha ao menos um dia"); return; }
+    var emp = document.getElementById("rtEmp").value;
+    var data = {title: title, time: tm, storeId: document.getElementById("rtStore").value, days: days.slice().sort(), role: emp ? "" : document.getElementById("rtRole").value,
+      employeeIds: emp ? [emp] : [], employeeNames: emp ? (employees[emp] || {}).name || "" : "",
+      items: taskDraftItems.filter(function(t){ return t.trim(); }).map(function(t){ return t.trim(); }), active: document.getElementById("rtActive").checked,
+      updatedAt: Date.now(), updatedBy: currentEmployeeName};
+    var btn = this; btn.disabled = true; btn.textContent = "Salvando…";
+    var op = id ? db.doc("routines/" + id).update(data) : db.collection("routines").add(Object.assign({createdAt: Date.now(), createdBy: currentEmployeeName}, data));
+    op.then(function(){ return callRpc("gerar_tarefas_rotinas", {}).catch(function(){}); })
+      .then(function(){ closeSheet(); showToast("Rotina salva · tarefas de hoje criadas"); renderTarefasV2(); refreshAlerts(); })
+      .catch(function(err){ showToast("Erro: " + errMsg(err)); btn.disabled = false; btn.textContent = "Salvar rotina"; });
+  });
+}
+
+// ---------- 🔔 alertas dentro do sistema ----------
+var alertState = {tasks: [], late: [], compra: [], at: 0, loading: false};
+function stockAlertRole() { var r = currentRole(); return r === "Operador de Estoque" || r === "Diretoria"; }
+function refreshAlerts() {
+  if (!currentEmployeeId || !db || alertState.loading) return;
+  alertState.loading = true;
+  var hoje = todayStr(), allowed = storeRestricted() ? allowedStoreIds() : storeOrder.slice();
+  var central = storeOrder.filter(function(id){ return stores[id] && stores[id].isCentral; })[0];
+  var jobs = [db.collection("tasks").where("status", "==", "pendente").limit(1000).get()];
+  if (stockAlertRole() && central) {
+    jobs.push(db.collection("stock").where("storeId", "==", central).get());
+    jobs.push(Promise.all(storeOrder.filter(function(id){ return !stores[id].isCentral; }).map(function(sid){ return db.doc("needs/" + sid).get().then(function(s){ return s.exists ? (s.data().items || {}) : {}; }).catch(function(){ return {}; }); })));
+  }
+  Promise.all(jobs).then(function(r){
+    var ts = r[0].docs.map(function(d){ return Object.assign({id: d.id}, d.data()); }).filter(function(t){
+      if (!t.kind) return false; if (allowed.indexOf(t.storeId) === -1) return false;
+      var d = t.dueDate || t.date; return !d || d <= hoje;
+    });
+    alertState.tasks = ts.filter(taskForMe).sort(function(a, b){ return (taskDue(a) || 9e15) - (taskDue(b) || 9e15); });
+    alertState.late = isManager() ? ts.filter(function(t){ return taskLate(t) && !taskForMe(t); }).sort(function(a, b){ return (taskDue(a) || 0) - (taskDue(b) || 0); }) : [];
+    alertState.compra = [];
+    if (r[1]) {
+      var qty = {}; r[1].docs.forEach(function(d){ var x = d.data(); qty[x.productId] = x.quantity || 0; });
+      var need = {}; (r[2] || []).forEach(function(items){ Object.keys(items).forEach(function(pid){ need[pid] = (need[pid] || 0) + (parseFloat(items[pid]) || 0); }); });
+      Object.keys(products).forEach(function(pid){
+        var p = products[pid]; if (!productInStore(pid, central)) return;
+        var q = qty[pid] || 0, min = typeof p.minStock === "number" ? p.minStock : 0, nd = need[pid] || 0;
+        var porMin = min > 0 && q <= min ? Math.max(min - q, 0) : 0, porNec = nd > q ? nd - q : 0;
+        if ((min > 0 && q <= min) || porNec > 0) alertState.compra.push({pid: pid, name: p.name, unit: p.unit || "un", qty: q, min: min, need: nd, falta: Math.max(porMin, porNec), zero: q <= 0});
+      });
+      alertState.compra.sort(function(a, b){ return (b.zero - a.zero) || (b.falta - a.falta); });
+    }
+    alertState.at = Date.now(); alertState.loading = false;
+    paintBell(); maybeAlertPopup();
+  }).catch(function(){ alertState.loading = false; });
+}
+function alertCount() { return alertState.tasks.length + alertState.late.length + (alertState.compra.length ? 1 : 0); }
+function paintBell() {
+  var b = document.getElementById("bellBtn"), c = document.getElementById("bellCount"); if (!b) return;
+  b.style.display = currentEmployeeId ? "" : "none";
+  var n = alertCount(), lateMine = alertState.tasks.filter(taskLate).length;
+  c.hidden = !n; c.textContent = n > 99 ? "99+" : String(n);
+  b.classList.toggle("has-late", lateMine + alertState.late.length > 0);
+}
+function maybeAlertPopup() {
+  var n = alertState.tasks.length, late = alertState.tasks.filter(taskLate).length;
+  var key = "alertPopup_" + currentEmployeeId + "_" + todayStr();
+  var shown = null; try { shown = localStorage.getItem(key); } catch (e) {}
+  var sig = n + "|" + late + "|" + alertState.compra.length;
+  if (!n && !alertState.compra.length) return;
+  if (shown === sig) return;
+  try { localStorage.setItem(key, sig); } catch (e) {}
+  var bar = document.getElementById("alertPop");
+  if (!bar) { bar = document.createElement("div"); bar.id = "alertPop"; document.body.appendChild(bar); bar.addEventListener("click", function(){ bar.style.display = "none"; openAlertsPanel(); }); }
+  var parts = [];
+  if (n) parts.push("📋 " + n + " tarefa(s) para você" + (late ? ' · <b>' + late + ' atrasada(s)</b>' : ''));
+  if (alertState.compra.length) parts.push("🛒 " + alertState.compra.length + " item(ns) para comprar no Estoque Central");
+  bar.innerHTML = parts.join("<br>") + '<div style="font-size:12px;opacity:.85;margin-top:4px;">Toque para ver</div>';
+  bar.className = late ? "late" : ""; bar.style.display = "block";
+  setTimeout(function(){ bar.style.display = "none"; }, 15000);
+}
+function openAlertsPanel() {
+  var h = '<h2>🔔 Avisos</h2>';
+  var row = function(t){ var late = taskLate(t); return '<div class="topic-row" data-gotask="' + t.id + '" data-gstore="' + t.storeId + '" style="' + (late ? 'border-left:4px solid var(--red);' : '') + '"><span><b>' + (t.kind === "rotina" ? '🔁 ' : '') + esc(t.title) + '</b><small>🏬 ' + esc(t.storeName || "") + (taskWhen(t) ? ' · ⏰ ' + esc(taskWhen(t)) : '') + ' · 👤 ' + esc(taskWho(t)) + '</small></span><b style="color:' + (late ? 'var(--red)' : 'var(--text-2)') + ';font-size:12px;">' + (late ? 'ATRASADA' : 'pendente') + '</b></div>'; };
+  h += '<div class="chart-title">📋 Suas tarefas</div>' + (alertState.tasks.length ? alertState.tasks.map(row).join("") : '<div class="topic-empty">Nenhuma tarefa pendente para você. 👏</div>');
+  if (isManager()) h += '<div class="chart-title" style="margin-top:14px;">⏰ Atrasadas nas lojas</div>' + (alertState.late.length ? alertState.late.map(row).join("") : '<div class="topic-empty">Nenhuma tarefa atrasada.</div>');
+  if (stockAlertRole()) {
+    h += '<div class="chart-title" style="margin-top:14px;">🛒 Comprar para o Estoque Central</div>';
+    h += alertState.compra.length ? alertState.compra.slice(0, 8).map(function(x){
+      return '<div class="topic-row static"><span><b>' + esc(x.name) + '</b><small>saldo ' + fmtQty(x.qty) + (x.min ? ' · mínimo ' + fmtQty(x.min) : '') + (x.need ? ' · lojas precisam ' + fmtQty(x.need) + '/dia' : '') + '</small></span><b style="color:' + (x.zero ? 'var(--red)' : 'var(--amber)') + ';">+' + fmtQty(Math.ceil(x.falta * 100) / 100) + ' ' + esc(x.unit) + '</b></div>';
+    }).join("") + (alertState.compra.length > 8 ? '<div class="topic-empty">+ ' + (alertState.compra.length - 8) + ' item(ns)</div>' : '') + '<button class="btn btn-secondary" id="alCompra" style="margin-top:8px;">🛒 Ver lista completa / compartilhar</button>'
+      : '<div class="topic-empty">Nada abaixo do mínimo nem da necessidade das lojas.</div>';
+  }
+  h += '<button class="btn btn-secondary" id="alClose" style="margin-top:12px;">Fechar</button>';
+  openSheet(h);
+  document.getElementById("alClose").addEventListener("click", closeSheet);
+  var ac = document.getElementById("alCompra"); if (ac) ac.addEventListener("click", openShoppingList);
+  sheet.querySelectorAll("[data-gotask]").forEach(function(r){ r.addEventListener("click", function(){
+    var tid = r.getAttribute("data-gotask"); closeSheet();
+    db.doc("tasks/" + tid).get().then(function(d){ if (!d.exists) return; scopedTasks[tid] = d.data(); openTaskDetail(tid); });
+  }); });
+}
+function openShoppingList() {
+  var l = alertState.compra;
+  var txt = "🛒 Lista de compra · Estoque Central · " + fmtDateShort(todayStr()) + "\n" + l.map(function(x){ return "• " + x.name + ": comprar " + fmtQty(Math.ceil(x.falta * 100) / 100) + " " + x.unit + " (saldo " + fmtQty(x.qty) + ")"; }).join("\n");
+  var h = '<h2>🛒 Lista de compra sugerida</h2><div class="sub">Estoque Central · itens no mínimo ou abaixo, e itens em que o saldo não cobre a necessidade diária das lojas.</div>' +
+    l.map(function(x){ return '<div class="topic-row static"><span><b>' + esc(x.name) + '</b><small>saldo ' + fmtQty(x.qty) + ' ' + esc(x.unit) + (x.min ? ' · mínimo ' + fmtQty(x.min) : '') + (x.need ? ' · necessidade das lojas ' + fmtQty(x.need) : '') + '</small></span><b>+' + fmtQty(Math.ceil(x.falta * 100) / 100) + ' ' + esc(x.unit) + '</b></div>'; }).join("") +
+    '<button class="btn btn-primary" id="slShare" style="margin-top:10px;">📤 Compartilhar (WhatsApp)</button><button class="btn btn-secondary" id="slCopy">📋 Copiar texto</button><button class="btn btn-secondary" id="slClose">Fechar</button>';
+  openSheet(h);
+  document.getElementById("slClose").addEventListener("click", closeSheet);
+  document.getElementById("slCopy").addEventListener("click", function(){ (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function(){ showToast("Lista copiada"); }, function(){ showToast("Não foi possível copiar"); }); });
+  document.getElementById("slShare").addEventListener("click", function(){
+    if (navigator.share) navigator.share({text: txt}).catch(function(){}); else window.open("https://wa.me/?text=" + encodeURIComponent(txt), "_blank");
+  });
+}
+setInterval(function(){ if (!document.hidden) refreshAlerts(); }, 5 * 60 * 1000);
+document.addEventListener("visibilitychange", function(){ if (!document.hidden && Date.now() - alertState.at > 60000) refreshAlerts(); });
+
 function renderTarefas() {
   if (!currentStoreId) { content.innerHTML = '<div class="empty-state">Selecione uma loja.</div>'; return; }
   var ids = Object.keys(scopedTasks).sort(function(a,b){ return (scopedTasks[b].createdAt||0)-(scopedTasks[a].createdAt||0); });
@@ -5253,13 +5530,22 @@ function renderTaskDetailSheet(taskId) {
       (photo ? '<img class="photo-thumb" src="' + photo + '" data-view="' + it.id + '">' : '<button class="photo-btn" data-photo="' + it.id + '">📷</button>') +
       '</div>';
   });
+  if (t.kind) html = html.replace('<div class="sub">' + esc(t.storeName||"") + '</div>', '<div class="sub">' + esc(t.storeName||"") + (taskWhen(t) ? ' · ⏰ ' + esc(taskWhen(t)) : '') + ' · 👤 ' + esc(taskWho(t)) + (taskLate(t) ? ' · <b style="color:var(--red)">atrasada</b>' : '') + '</div>');
+  if (t.status === "concluida" && t.doneByName) html += '<div class="item-row" style="margin:8px 0;">✅ Feita por <b>' + esc(t.doneByName) + '</b>' + (t.doneAt ? ' em ' + fmtDate(t.doneAt) : '') + '</div>';
   html += '<input type="file" accept="image/*" capture="environment" id="photoInput" style="display:none;">';
+  if (!(t.items || []).length && t.status !== "concluida") html += '<button class="btn btn-primary" id="bTaskDone" style="margin-top:14px;">✅ Marcar como feita</button>';
+  else if (!(t.items || []).length && t.status === "concluida") html += '<button class="btn btn-secondary" id="bTaskUndo" style="margin-top:14px;">Reabrir tarefa</button>';
   html += '<button class="btn btn-secondary" id="bClose" style="margin-top:14px;">Fechar</button>';
   if (t.status !== "concluida" && canEditDelete()) {
     html += '<button class="link-btn link-danger" id="bDelTask">Excluir checklist</button>';
   }
   openSheet(html);
   document.getElementById("bClose").addEventListener("click", closeSheet);
+  var tdb = document.getElementById("bTaskDone"); if (tdb) tdb.addEventListener("click", function(){
+    db.doc("tasks/" + taskId).update({status: "concluida", doneAt: Date.now(), doneBy: currentEmployeeId, doneByName: currentEmployeeName})
+      .then(function(){ closeSheet(); showToast("Tarefa feita ✅"); refreshAlerts(); }).catch(function(err){ showToast("Erro: " + errMsg(err)); }); });
+  var tub = document.getElementById("bTaskUndo"); if (tub) tub.addEventListener("click", function(){
+    db.doc("tasks/" + taskId).update({status: "pendente", doneAt: null, doneBy: null, doneByName: ""}).then(function(){ closeSheet(); refreshAlerts(); }); });
   var delBtn = document.getElementById("bDelTask");
   if (delBtn) delBtn.addEventListener("click", function(){
     db.doc("tasks/"+taskId).delete().then(function(){ closeSheet(); showToast("Checklist excluído"); });
@@ -5294,8 +5580,9 @@ function toggleTaskItem(taskId, itemId, done) {
   var t = scopedTasks[taskId]; if (!t) return;
   var items = (t.items||[]).map(function(it){ return it.id===itemId ? Object.assign({},it,{done:done}) : it; });
   var allDone = items.length>0 && items.every(function(it){return it.done;});
-  db.doc("tasks/"+taskId).update({ items: items, status: allDone ? "concluida" : "pendente" }).then(function(){
-    showToast(done ? "Item concluído" : "Item reaberto");
+  db.doc("tasks/"+taskId).update({ items: items, status: allDone ? "concluida" : "pendente", doneAt: allDone ? Date.now() : null, doneBy: allDone ? currentEmployeeId : null, doneByName: allDone ? currentEmployeeName : "" }).then(function(){
+    if (scopedTasks[taskId]) { scopedTasks[taskId].items = items; scopedTasks[taskId].status = allDone ? "concluida" : "pendente"; }
+    showToast(done ? "Item concluído" : "Item reaberto"); if (allDone) refreshAlerts();
   }).catch(function(){ showToast("Erro ao atualizar"); });
 }
 function compressImage(file, maxDim, quality) {
@@ -6605,7 +6892,7 @@ function subscribeScoped(route) {
       scopedCosts = snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
       if (currentRoute==="painel") renderRoute();
     }));
-    scopedUnsubs.push(db.collection("tasks").where("storeId","==",storeId).limit(200).onSnapshot(function(snap){
+    scopedUnsubs.push(db.collection("tasks").where("storeId","==",storeId).where("createdAt",">=",Date.now()-45*86400000).limit(1000).onSnapshot(function(snap){
       var m = {};
       snap.docs.forEach(function(d){ m[d.id] = Object.assign({id:d.id}, d.data()); });
       scopedTasks = m;
@@ -6685,7 +6972,7 @@ function subscribeScoped(route) {
   } else if (route === "geladeira") {
     subscribeFridge(storeId);
   } else if (route === "tarefas") {
-    scopedUnsubs.push(db.collection("tasks").where("storeId","==",storeId).limit(200).onSnapshot(function(snap){
+    scopedUnsubs.push(db.collection("tasks").where("storeId","==",storeId).where("createdAt",">=",Date.now()-45*86400000).limit(1000).onSnapshot(function(snap){
       var m = {};
       snap.docs.forEach(function(d){ m[d.id] = Object.assign({id:d.id}, d.data()); });
       scopedTasks = m;
@@ -7003,6 +7290,8 @@ function startApp() {
     employees[d.id] = Object.assign({id: d.id}, d.data());
     setOperator(d.id);
     loginScreen.classList.remove("show");
+    setTimeout(refreshAlerts, 2500);
+    var bb = document.getElementById("bellBtn"); if (bb && !bb._bound) { bb._bound = true; bb.addEventListener("click", function(){ if (!alertState.at) refreshAlerts(); openAlertsPanel(); }); }
     document.body.classList.remove("locked");
     var btn = document.getElementById("lgBtn"); btn.disabled = false; btn.textContent = "Entrar";
     document.getElementById("lgPass").value = "";
