@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261120155303">
+<meta name="app-build" content="20261120160310">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -364,6 +364,10 @@
 .fg-howto b { display:block; color:var(--text); font-size:13.5px; margin-bottom:2px; }
 .fg-howto > span { grid-column:1 / -1; font-size:12px; }
 .fg-item { border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:10px 12px; margin-bottom:8px; }
+.fg-item.fg-zero { border:2px solid var(--red); background:var(--red-bg, rgba(220,38,38,.08)); }
+.fg-zerotag { display:inline-block; margin-left:6px; font-size:11px; font-weight:800; color:#fff; background:var(--red); border-radius:6px; padding:2px 6px; vertical-align:middle; }
+.fg-pair input.fg-inzero { border:2px solid var(--red); color:var(--red); font-weight:800; background:var(--red-bg, rgba(220,38,38,.08)); }
+.fg-zerosum { margin:0 0 8px; padding:10px 12px; border-radius:10px; border:2px solid var(--red); background:var(--red-bg, rgba(220,38,38,.08)); font-size:13.5px; }
 .fg-name { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:8px; } .fg-name b { font-size:14.5px; } .fg-name small { font-size:11.5px; color:var(--text-2); white-space:nowrap; }
 .fg-shifts { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .fg-shift { background:var(--surface-2); border-radius:10px; padding:7px 8px; }
@@ -1628,6 +1632,7 @@ function confOrigin(m) {
   if (m.kind === "recebimento_bruto") return "📥 Recebimento de mercadoria";
   if (m.kind === "contagem") return "📋 Contagem";
   if (m.kind === "contagem_venda") return "🧾 Venda apurada na contagem";
+  if (m.kind === "abastecimento_geladeira") return "🧊 Abastecimento da geladeira";
   return m.note ? m.note : "Entrada manual";
 }
 function loadConferencia() {
@@ -6496,7 +6501,8 @@ function fridgeEditable() { return canManageFridge() || fridgeDate === todayStr(
 
 function subscribeFridge(storeId) {
   if (!fridgeDate) fridgeDate = todayStr();
-  fridgeDay = null; fridgeDayLoaded = false; fridgePrev = null; fridgeDraft = {}; fridgeDocExists = false; fridgeStatusText = "";
+  fridgeDay = null; fridgeDayLoaded = false; fridgePrev = null; fridgeDraft = fridgeDraftLoad(storeId, fridgeDate); fridgeDocExists = false;
+  fridgeStatusText = Object.keys(fridgeDraft).length ? "⚠️ Há números digitados e ainda não salvos — toque em 💾 Salvar contagem" : "";
   scopedUnsubs.push(db.doc("meta/fridgeConfig").onSnapshot(function(snap){
     fridgeConfig = snap.exists ? snap.data() : null; fridgeConfigLoaded = true;
     if (currentRoute === "geladeira") renderGeladeira();
@@ -6542,7 +6548,8 @@ function renderGeladeira() {
     '<div class="field" style="margin-bottom:8px;"><label>Loja</label><input type="text" value="' + esc(sname) + '" disabled></div></div>';
   html += '<div class="fg-howto"><div><b>☀️ Turno almoço · ' + FRIDGE_SHIFTS.lunch + '</b>Conte quantas tem na geladeira e informe quanto você colocou.</div>' +
     '<div><b>🌙 Turno jantar · ' + FRIDGE_SHIFTS.dinner + '</b>Conte de novo e informe quanto colocou.</div>' +
-    '<span>Ao terminar, toque em <b>💾 Salvar contagem</b>. O sistema calcula quanto saiu em cada turno.' + (editable ? '' : ' <b style="color:var(--amber);">Dia anterior: somente leitura.</b>') + '</span></div>';
+    '<span>Ao terminar, toque em <strong>💾 Salvar contagem</strong>. O sistema calcula quanto saiu em cada turno.' + (editable ? '' : ' <b style="color:var(--amber);">Dia anterior: somente leitura.</b>') + '</span></div>';
+  html += '<div id="fgZeroSum" class="fg-zerosum" style="display:none;"></div>';
   html += '<div id="fgStatus" style="font-size:12px;color:var(--text-2);min-height:16px;margin-bottom:6px;">' + esc(fridgeStatusText) + '</div>';
   if (!items.length) {
     html += '<div class="empty-state"><div class="emoji">🥤</div>Nenhuma bebida vinculada a ' + esc(sname) + '.<br>' +
@@ -6551,7 +6558,8 @@ function renderGeladeira() {
   var tot = {ab: 0, lunch: 0, lunchN: 0, dinner: 0, dinnerN: 0, prev: 0, prevN: 0};
   var dis = editable ? "" : " disabled";
   function inp(id, field, val, ph) {
-    return '<input class="fgInp" data-fid="' + id + '" data-ff="' + field + '" type="number" inputmode="numeric" min="0" step="any" value="' + esc(val) + '" placeholder="' + ph + '"' + dis + '>';
+    var zc = /Count$/.test(field) && numOrNull(val) === 0 ? ' fg-inzero' : '';
+    return '<input class="fgInp' + zc + '" data-fid="' + id + '" data-ff="' + field + '" type="number" inputmode="numeric" min="0" step="any" value="' + esc(val) + '" placeholder="' + ph + '"' + dis + '>';
   }
   function hm(ts) { return ts ? new Date(ts).toLocaleTimeString("pt-BR", {hour: "2-digit", minute: "2-digit"}) : ""; }
   items.forEach(function(it){
@@ -6561,8 +6569,9 @@ function renderGeladeira() {
     if (k.lunch !== null) { tot.lunch += k.lunch; tot.lunchN++; }
     if (k.dinner !== null) { tot.dinner += k.dinner; tot.dinnerN++; }
     if (k.prevDinner !== null) { tot.prev += k.prevDinner; tot.prevN++; }
-    html += '<div class="fg-item">' +
-      '<div class="fg-name"><b>' + esc(it.name) + '</b><small>' + (r.by ? '👤 ' + esc(r.by.split(" ")[0]) : '') + '</small></div>' +
+    var z = fridgeZeroState(r);
+    html += '<div class="fg-item' + (z.zero ? ' fg-zero' : '') + '" data-fitem="' + it.id + '">' +
+      '<div class="fg-name"><b>' + esc(it.name) + '</b><span class="fg-zerotag"' + (z.zero ? '' : ' style="display:none;"') + '>🔴 ZERADO · URGENTE</span><small>' + (r.by ? '👤 ' + esc(r.by.split(" ")[0]) : '') + '</small></div>' +
       '<div class="fg-shifts">' +
         '<div class="fg-shift"><div class="fg-sh">☀️ Almoço · ' + FRIDGE_SHIFTS.lunch + (r.lunchAt ? ' <small>(' + hm(r.lunchAt) + ')</small>' : '') + '</div>' +
           '<div class="fg-pair"><label>Contagem' + inp(it.id, "lunchCount", r.lunchCount, "tem") + '</label><label>Abastecido' + inp(it.id, "lunchQty", r.lunchQty, "pôs") + '</label></div></div>' +
@@ -6585,7 +6594,7 @@ function renderGeladeira() {
   if (editable && items.length) html += '<div class="fg-savebar"><button class="btn btn-primary" id="fgSaveNow">💾 Salvar contagem</button><div id="fgSaveInfo">' + esc(fridgeStatusText || "Toque para gravar os números digitados.") + '</div></div>';
   if (fridgeDay && fridgeDay.updatedAt) html += '<div style="font-size:11.5px;color:var(--text-2);">Última alteração: ' + fmtDate(fridgeDay.updatedAt) + (fridgeDay.updatedByName ? ' por ' + esc(fridgeDay.updatedByName) : '') + '</div>';
   content.innerHTML = html;
-  bindGeladeira();
+  bindGeladeira(); fridgePaintZeroSummary();
 }
 function fridgeOutHtml(k) {
   function v(x, empty) { return x === null ? '<i>' + empty + '</i>' : '<b' + (x < 0 ? ' style="color:var(--red);"' : '') + '>' + fmtQty(x) + '</b>'; }
@@ -6597,7 +6606,6 @@ function bindGeladeira() {
   if (d) d.addEventListener("change", function(e){
     if (!e.target.value) return;
     if (!canManageFridge() && e.target.value > todayStr()) { e.target.value = fridgeDate; return; }
-    if (Object.keys(fridgeDraft).length && !confirm("Há números não salvos nesta data. Trocar de data e descartar?")) { e.target.value = fridgeDate; return; }
     fridgeDate = e.target.value; subscribeScoped("geladeira");
   });
   var el = document.getElementById("fgEditList");
@@ -6608,8 +6616,8 @@ function bindGeladeira() {
     inp.addEventListener("input", function(){
       var id = inp.getAttribute("data-fid"), f = inp.getAttribute("data-ff");
       if (!fridgeDraft[id]) fridgeDraft[id] = {};
-      fridgeDraft[id][f] = inp.value;
-      updateFridgeRowCalc(id);
+      fridgeDraft[id][f] = inp.value; fridgeDraftPersist();
+      updateFridgeRowCalc(id); fridgePaintZero(id);
       scheduleFridgeSave(id);
     });
     inp.addEventListener("blur", function(){ setTimeout(function(){ if (fridgePendingRender && currentRoute === "geladeira") renderGeladeira(); }, 80); });
@@ -6633,6 +6641,32 @@ function updateFridgeRowCalc(id) {
 }
 
 window.addEventListener("beforeunload", function(e){ if (currentRoute === "geladeira" && Object.keys(fridgeDraft).length) { e.preventDefault(); e.returnValue = ""; } });
+function fridgeDraftKey(storeId, date) { return "fgDraft_" + (currentEmployeeId || "") + "_" + storeId + "_" + date; }
+function fridgeDraftLoad(storeId, date) { try { var v = JSON.parse(localStorage.getItem(fridgeDraftKey(storeId, date)) || "{}"); return (v && typeof v === "object") ? v : {}; } catch (e) { return {}; } }
+function fridgeDraftPersist() {
+  if (!currentStoreId || !fridgeDate) return;
+  try { var k = fridgeDraftKey(currentStoreId, fridgeDate); if (Object.keys(fridgeDraft).length) localStorage.setItem(k, JSON.stringify(fridgeDraft)); else localStorage.removeItem(k); } catch (e) {}
+}
+// bebida zerada = última contagem do dia igual a 0 (jantar, se já contado; senão almoço)
+function fridgeZeroState(r) {
+  var lc = numOrNull(r.lunchCount), dc = numOrNull(r.dinnerCount);
+  var last = dc !== null ? dc : lc;
+  return {zero: last === 0, lunch: lc === 0, dinner: dc === 0};
+}
+function fridgePaintZero(id) {
+  var r = fridgeRow(id), z = fridgeZeroState(r), box = content.querySelector('.fg-item[data-fitem="' + id + '"]'); if (!box) return;
+  box.classList.toggle("fg-zero", z.zero);
+  var lc = box.querySelector('[data-ff="lunchCount"]'), dc = box.querySelector('[data-ff="dinnerCount"]');
+  if (lc) lc.classList.toggle("fg-inzero", z.lunch); if (dc) dc.classList.toggle("fg-inzero", z.dinner);
+  var tag = box.querySelector(".fg-zerotag"); if (tag) tag.style.display = z.zero ? "" : "none";
+  fridgePaintZeroSummary();
+}
+function fridgePaintZeroSummary() {
+  var el = document.getElementById("fgZeroSum"); if (!el) return;
+  var names = []; fridgeItems().forEach(function(it){ if (fridgeZeroState(fridgeRow(it.id)).zero) names.push(it.name); });
+  el.style.display = names.length ? "" : "none";
+  el.innerHTML = names.length ? '🔴 <b>' + names.length + ' bebida(s) zerada(s) — repor com urgência:</b> ' + names.map(esc).join(", ") : "";
+}
 function setFridgeStatus(txt) { fridgeStatusText = txt; var s = document.getElementById("fgStatus"); if (s) s.textContent = txt; var i = document.getElementById("fgSaveInfo"); if (i) i.textContent = txt; }
 function scheduleFridgeSave(id) {
   clearTimeout(fridgeSaveTimers[id]);
@@ -6653,7 +6687,7 @@ function flushFridgeSave(id) {
   var it = fridgeItems().filter(function(x){ return x.id === id; })[0];
   row.name = it ? it.name : (old.name || "");
   var patch = {}; patch["r_" + id] = row;
-  delete fridgeDraft[id];
+  delete fridgeDraft[id]; fridgeDraftPersist();
   if (!fridgeDay) fridgeDay = {};
   fridgeDay["r_" + id] = row;
   saveFridgeFields(patch);
