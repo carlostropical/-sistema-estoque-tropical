@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261120160310">
+<meta name="app-build" content="20261120190037">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -458,6 +458,7 @@
 #askSave .ask-q { font-weight:800; margin:12px 0 10px; text-align:center; } #askSave .ask-li { font-size:13px; border-top:1px solid var(--border); padding-top:4px; margin-top:4px; }
 #askSave .ask-warn { margin-top:8px; padding:8px; border-radius:8px; background:var(--amber-bg); border:1px solid var(--amber); font-size:13px; } #askSave .ask-list { font-size:13px; color:var(--text-2); }
 @media (min-width:700px) { #askSave { align-items:center; } }
+.rp-row { display:flex; justify-content:space-between; align-items:center; gap:10px; } .rp-row .btn { width:auto; margin:0; white-space:nowrap; }
 </style>
 </head>
 <body class="locked">
@@ -1632,6 +1633,7 @@ function confOrigin(m) {
   if (m.kind === "recebimento_bruto") return "📥 Recebimento de mercadoria";
   if (m.kind === "contagem") return "📋 Contagem";
   if (m.kind === "contagem_venda") return "🧾 Venda apurada na contagem";
+  if (m.kind === "devolucao") return "↩️ Devolução ao estoque" + (m.reason ? " · " + m.reason : "");
   if (m.kind === "abastecimento_geladeira") return "🧊 Abastecimento da geladeira";
   return m.note ? m.note : "Entrada manual";
 }
@@ -3759,7 +3761,7 @@ function renderCompras() {
     html += '<button class="btn btn-secondary" id="bReceiveShipment" style="margin-bottom:6px;">📥 Receber mercadoria' + (pendingForMe.length?' ('+pendingForMe.length+')':'') + '</button>';
   } else {
     html += '<button class="btn btn-secondary" id="bReceiveShipment" style="margin-bottom:6px;">📥 Receber mercadoria' + (pendingForMe.length?' ('+pendingForMe.length+')':'') + '</button>';
-    html += '<button class="btn btn-secondary" id="bReturnShipment" style="margin-bottom:6px;">↩️ Informar devolução</button>';
+    html += '<button class="btn btn-secondary" id="bReturnShipment" style="margin-bottom:6px;">↩️ Devolver mercadoria para o estoque</button>';
   }
   html += '</div>';
 
@@ -3801,7 +3803,7 @@ function renderCompras() {
   var recvBtn = document.getElementById("bReceiveShipment");
   if (recvBtn) recvBtn.addEventListener("click", function(){ openReceiveShipmentPicker(pendingForMe, isCentral); });
   var retBtn = document.getElementById("bReturnShipment");
-  if (retBtn) retBtn.addEventListener("click", openReturnForm);
+  if (retBtn) retBtn.addEventListener("click", openReturnPicker);
   content.querySelectorAll("[data-shipment]").forEach(function(row){
     row.addEventListener("click", function(){ openShipmentDetail(row.getAttribute("data-shipment")); });
   });
@@ -4310,7 +4312,7 @@ function shipmentKindLabel(s) { return s.kind==="devolucao" ? "Devolução" : "P
 function shipmentRowHtml(s) {
   return '<div class="card" data-shipment="' + s.id + '"><div class="info">' +
     '<div class="name">' + shipmentKindLabel(s) + ': ' + esc(s.originStoreName) + ' → ' + esc(s.destStoreName) + '</div>' +
-    '<div class="meta">' + (s.orderLabel ? esc(s.orderLabel) + ' · ' : '') + fmtDate(s.sentAt) + ' · ' + (s.items?s.items.length:0) + ' item(ns)</div>' +
+    '<div class="meta">' + (s.reason ? '<b>' + esc(s.reason) + '</b> · ' : '') + (s.orderLabel ? esc(s.orderLabel) + ' · ' : '') + fmtDate(s.sentAt) + ' · ' + (s.items?s.items.length:0) + ' item(ns)</div>' +
     shipmentStatusBadge(s) + '</div></div>';
 }
 
@@ -4551,6 +4553,66 @@ function submitReceiveShipment(s) {
 }
 
 // ---- Informar devolução (loja -> estoque central) ----
+// ---- Devolver mercadoria para o estoque (loja -> Estoque Central), item a item com motivo ----
+var RETURN_REASONS = ["Não vendeu", "Próximo da validade final", "Produto vencido", "Produto com problema de qualidade"];
+function openReturnPicker() {
+  if (!requireRole(["Operador de Loja","Gerência","Diretoria"])) return;
+  var centralId = storeOrder.filter(function(id){ return stores[id].isCentral; })[0];
+  if (!centralId) { showToast("Nenhum estoque central cadastrado"); return; }
+  var ids = Object.keys(scopedStock).filter(function(pid){ return products[pid] && (scopedStock[pid].quantity || 0) > 0; })
+    .sort(function(a,b){ return (products[a].name || "").localeCompare(products[b].name || "", "pt-BR"); });
+  openSheet('<h2>↩️ Devolver mercadoria para o estoque</h2><div class="sub">Itens com saldo em ' + esc(stores[currentStoreId].name) + '. Toque em <b>Devolver</b> no item que vai voltar para ' + esc(stores[centralId].name) + '.</div>' +
+    '<div class="field"><input type="search" id="rpSearch" placeholder="🔎 Buscar produto"></div><div id="rpList"></div>' +
+    '<button class="btn btn-secondary" id="rpClose">Fechar</button>');
+  function draw() {
+    var t = (document.getElementById("rpSearch").value || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    var list = ids.filter(function(pid){ return !t || (products[pid].name || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").indexOf(t) !== -1; });
+    document.getElementById("rpList").innerHTML = list.length ? list.map(function(pid){
+      var p = products[pid];
+      return '<div class="item-row rp-row"><div><b>' + esc(p.name) + '</b><br><small style="color:var(--text-2);">Saldo: ' + fmtQty(scopedStock[pid].quantity) + ' ' + esc(p.unit || "un") + '</small></div>' +
+        '<button class="btn btn-secondary btn-sm" data-rp="' + pid + '" type="button">↩️ Devolver</button></div>';
+    }).join("") : '<div class="empty-state" style="padding:20px;">' + (ids.length ? 'Nenhum produto encontrado.' : 'Nenhum item com saldo nesta loja.') + '</div>';
+    document.getElementById("rpList").querySelectorAll("[data-rp]").forEach(function(b){ b.addEventListener("click", function(){ openReturnItem(b.getAttribute("data-rp"), centralId); }); });
+  }
+  document.getElementById("rpSearch").addEventListener("input", draw);
+  document.getElementById("rpClose").addEventListener("click", closeSheet);
+  draw();
+}
+function openReturnItem(pid, centralId) {
+  var p = products[pid], avail = scopedStock[pid] ? scopedStock[pid].quantity : 0, un = p.unit || "un";
+  openSheet('<h2>↩️ Devolver ' + esc(p.name) + '</h2><div class="sub">Volta para ' + esc(stores[centralId].name) + ' · saldo na loja: <b>' + fmtQty(avail) + ' ' + esc(un) + '</b></div>' +
+    '<div class="field"><label>Quantidade devolvida (' + esc(un) + ')*</label><input type="number" inputmode="decimal" min="0" step="any" id="riQty" placeholder="Ex: 2"></div>' +
+    '<div class="field"><label>Motivo da devolução*</label><select id="riReason"><option value="">Selecione</option>' +
+      RETURN_REASONS.map(function(r){ return '<option>' + esc(r) + '</option>'; }).join("") + '</select></div>' +
+    '<div class="field"><label>Observação (opcional)</label><input type="text" id="riNote" placeholder="Ex: lote 123, embalagem amassada"></div>' +
+    '<button class="btn btn-primary" id="riSave">↩️ Devolver para o estoque</button><button class="btn btn-secondary" id="riBack">Voltar</button>');
+  document.getElementById("riBack").addEventListener("click", openReturnPicker);
+  document.getElementById("riSave").addEventListener("click", function(){
+    var q = parseFloat(String(document.getElementById("riQty").value).replace(",", "."));
+    var reason = document.getElementById("riReason").value, note = document.getElementById("riNote").value.trim(), btn = this;
+    if (!(q > 0)) { showToast("Informe a quantidade devolvida"); return; }
+    if (q > avail + 1e-9) { showToast("Quantidade maior que o saldo da loja (" + fmtQty(avail) + " " + un + ")"); return; }
+    if (!reason) { showToast("Escolha o motivo da devolução"); return; }
+    askSave("Devolução para o estoque", '<div>' + esc(p.name) + '</div><div>Quantidade devolvida: <b>' + fmtQty(q) + ' ' + esc(un) + '</b></div><div>Motivo: <b>' + esc(reason) + '</b></div>' +
+      (note ? '<div>Obs.: ' + esc(note) + '</div>' : '') + '<div>Saldo da loja: ' + fmtQty(avail) + ' → <b>' + fmtQty(avail - q) + ' ' + esc(un) + '</b></div><div>' + esc(stores[centralId].name) + ' confirma o recebimento em <b>📥 Receber mercadoria</b>.</div>').then(function(ok){
+      if (!ok) return;
+      btn.disabled = true; btn.textContent = "Enviando…";
+      var now = Date.now(), originName = stores[currentStoreId].name, destName = stores[centralId].name, cur = scopedStock[pid] ? scopedStock[pid].quantity : 0;
+      var item = {productId: pid, productName: p.name, unit: un, qtySent: q, qtyReceived: null, costAtSend: p.cost || 0, reason: reason};
+      db.doc("stock/" + currentStoreId + "_" + pid).set({storeId: currentStoreId, productId: pid, quantity: cur - q, updatedAt: now}).then(function(){
+        scopedStock[pid] = {storeId: currentStoreId, productId: pid, quantity: cur - q, updatedAt: now};
+        return db.collection("movements").add({storeId: currentStoreId, storeName: originName, productId: pid, productName: p.name, kind: "devolucao",
+          type: "saida", quantity: q, employeeId: currentEmployeeId, employeeName: currentEmployeeName, reason: reason,
+          note: "Devolução para " + destName + " · " + reason + (note ? " · " + note : ""), timestamp: now});
+      }).then(function(){
+        return db.collection("shipments").add({originStoreId: currentStoreId, originStoreName: originName, destStoreId: centralId, destStoreName: destName,
+          items: [item], status: "enviado", kind: "devolucao", reason: reason, notes: reason + (note ? " · " + note : ""),
+          sentBy: currentEmployeeId, sentByName: currentEmployeeName, sentAt: now, receivedBy: null, receivedByName: "", receivedAt: null, receiveNotes: ""});
+      }).then(function(){ showToast("✅ Devolução enviada para " + destName); openReturnPicker(); })
+        .catch(function(err){ showToast("Erro ao devolver: " + errMsg(err)); btn.disabled = false; btn.textContent = "↩️ Devolver para o estoque"; });
+    });
+  });
+}
 var returnDraftItems = [];
 function openReturnForm() {
   if (!requireRole(["Operador de Loja","Diretoria"])) return;
@@ -4651,7 +4713,7 @@ function openShipmentDetail(shipmentId) {
   s.items.forEach(function(it){
     var div = it.qtyReceived!==null && it.qtyReceived!==it.qtySent;
     html += '<div class="item-row" style="display:flex;justify-content:space-between;' + (div?'border-color:var(--red);':'') + '">' +
-      '<div>' + esc(it.productName) + '</div><div>' +
+      '<div>' + esc(it.productName) + (it.reason ? '<br><small style="color:var(--text-2);">Motivo: ' + esc(it.reason) + '</small>' : '') + '</div><div>' +
       'Enviado: ' + fmtQty(it.qtySent) + (it.qtyReceived!==null ? ' · Recebido: <b style="' + (div?'color:var(--red)':'') + '">' + fmtQty(it.qtyReceived) + '</b>' : ' · aguardando') +
       '</div></div>';
   });
@@ -5859,7 +5921,7 @@ function openDiretoriaShipmentDetail(id) {
   s.items.forEach(function(it){
     var div = it.qtyReceived!==null && it.qtyReceived!==it.qtySent;
     html += '<div class="item-row" style="display:flex;justify-content:space-between;' + (div?'border-color:var(--red);':'') + '">' +
-      '<div>' + esc(it.productName) + '</div><div>' +
+      '<div>' + esc(it.productName) + (it.reason ? '<br><small style="color:var(--text-2);">Motivo: ' + esc(it.reason) + '</small>' : '') + '</div><div>' +
       'Enviado: ' + fmtQty(it.qtySent) + ' · Valor: ' + fmtMoney(it.qtySent*(it.costAtSend||0)) +
       (it.qtyReceived!==null ? '<br>Recebido: <b style="' + (div?'color:var(--red)':'') + '">' + fmtQty(it.qtyReceived) + '</b>' : '<br>aguardando recebimento') +
       '</div></div>';
