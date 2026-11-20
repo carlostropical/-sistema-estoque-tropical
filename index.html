@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261118200543">
+<meta name="app-build" content="20261120155303">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -448,6 +448,12 @@
 .task-card.late { border-left:4px solid var(--red); } .task-card.done { opacity:.6; }
 .fg-savebar { position:sticky; bottom:0; z-index:5; background:var(--surface); padding:10px 0 8px; margin:6px 0 10px; border-top:1px solid var(--border); }
 .fg-savebar .btn { margin:0; } #fgSaveInfo { font-size:12px; color:var(--text-2); text-align:center; margin-top:5px; }
+#askSave { display:none; position:fixed; inset:0; z-index:10050; background:rgba(15,20,30,.55); align-items:flex-end; justify-content:center; padding:12px; }
+#askSave .ask-card { background:var(--surface); color:var(--text); width:100%; max-width:460px; border-radius:16px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.3); }
+#askSave .ask-t { font-size:17px; font-weight:800; margin-bottom:8px; } #askSave .ask-b { font-size:14px; line-height:1.55; background:var(--surface-2); border-radius:10px; padding:10px 12px; max-height:45vh; overflow:auto; }
+#askSave .ask-q { font-weight:800; margin:12px 0 10px; text-align:center; } #askSave .ask-li { font-size:13px; border-top:1px solid var(--border); padding-top:4px; margin-top:4px; }
+#askSave .ask-warn { margin-top:8px; padding:8px; border-radius:8px; background:var(--amber-bg); border:1px solid var(--amber); font-size:13px; } #askSave .ask-list { font-size:13px; color:var(--text-2); }
+@media (min-width:700px) { #askSave { align-items:center; } }
 </style>
 </head>
 <body class="locked">
@@ -1621,6 +1627,7 @@ function confOrigin(m) {
   if (m.kind === "producao") return "🔪 Produção";
   if (m.kind === "recebimento_bruto") return "📥 Recebimento de mercadoria";
   if (m.kind === "contagem") return "📋 Contagem";
+  if (m.kind === "contagem_venda") return "🧾 Venda apurada na contagem";
   return m.note ? m.note : "Entrada manual";
 }
 function loadConferencia() {
@@ -1740,7 +1747,7 @@ function openConfProduct(pid) {
   h += r.list.length ? r.list.map(function(m){
     var k = movKind(m), sign = m.type === "entrada" ? "+" : "−";
     return '<div class="topic-row static"><span><b>' + confHour(m.timestamp) + ' · ' + esc(MOV_KINDS[k].replace(/^\S+ /, "")) + '</b><small>' + esc(m.employeeName || "sem nome") + (m.note ? ' · ' + esc(m.note) : '') +
-      (m.kind === "contagem" && m.sysQty !== undefined ? ' · sistema ' + fmtQty(m.sysQty) + ' → contado ' + fmtQty(m.countedQty) : '') + '</small></span><b class="' + (sign === "+" ? 'cf-pos' : 'cf-neg') + '">' + sign + fmtQty(m.quantity) + '</b></div>';
+      ((m.kind === "contagem" || m.kind === "contagem_venda") && m.sysQty !== undefined ? ' · sistema ' + fmtQty(m.sysQty) + ' → contado ' + fmtQty(m.countedQty) : '') + '</small></span><b class="' + (sign === "+" ? 'cf-pos' : 'cf-neg') + '">' + sign + fmtQty(m.quantity) + '</b></div>';
   }).join("") : '<div class="topic-empty">Nenhum lançamento neste dia.</div>';
   openSheet(h + '<button class="btn btn-secondary" id="cfpClose" style="margin-top:12px;">Fechar</button>');
   document.getElementById("cfpClose").addEventListener("click", closeSheet);
@@ -2747,7 +2754,7 @@ function saveCountCategory(catKey, btn) {
         .then(function(){
           scopedStock[d.pid] = {storeId:currentStoreId, productId:d.pid, quantity:d.q, updatedAt:Date.now()};
           return db.collection("movements").add({storeId:currentStoreId, storeName:storeName, productId:d.pid, productName:d.name,
-            kind: "contagem", sysQty: d.sys, countedQty: d.q,
+            kind: countDiffKind(d), sysQty: d.sys, countedQty: d.q,
             type: d.q > d.sys ? "entrada" : "saida", quantity: Math.abs(d.q - d.sys),
             employeeId:currentEmployeeId, employeeName:currentEmployeeName, note:"Contagem parcial (" + catName + ") " + fmtDateShort(date), timestamp:Date.now()});
         });
@@ -2797,7 +2804,7 @@ function submitCount() {
       return db.doc("stock/"+currentStoreId+"_"+d.pid).set({storeId:currentStoreId, productId:d.pid, quantity:d.q, updatedAt:Date.now()})
         .then(function(){
           return db.collection("movements").add({storeId:currentStoreId, storeName:storeName, productId:d.pid, productName:d.name,
-            kind: "contagem", sysQty: d.sys, countedQty: d.q,
+            kind: countDiffKind(d), sysQty: d.sys, countedQty: d.q,
             type: d.q > d.sys ? "entrada" : "saida", quantity: Math.abs(d.q - d.sys),
             employeeId:currentEmployeeId, employeeName:currentEmployeeName, note:(kindNow ? "Contagem do produzido " : "Ajuste de contagem ") + fmtDateShort(date), timestamp:Date.now()});
         });
@@ -2822,6 +2829,7 @@ function openProductStockDetail(pid) {
   var html = '<h2>' + esc(p.name) + '</h2><div class="sub">' + (p.sku?"Código: "+esc(p.sku):"Sem código") + '</div>' +
     '<div style="text-align:center;padding:12px 0;"><div style="font-size:32px;font-weight:800;">' + fmtQty(qty) + ' <span style="font-size:15px;color:var(--text-2);font-weight:600">' + esc(p.unit||"un") + '</span></div>' +
     '<div style="color:var(--text-2);font-size:13px;">em estoque' + (low?' · <span style="color:var(--amber);font-weight:700">abaixo do mínimo ('+fmtQty(p.minStock)+')</span>':'') + '</div></div>' +
+    '<button class="btn btn-primary" id="bCountOne" style="margin-bottom:8px;">📋 Contar · informar quanto tem agora</button>' +
     '<div class="actions-3"><button class="btn btn-entrada" id="bEnt">↓ Entrada</button><button class="btn btn-saida" id="bSai">↑ Saída</button><button class="btn btn-perda" id="bPer">⚠ Perda</button></div>';
   if (lots.length) {
     html += '<div class="chart-title">Lotes / validades</div>';
@@ -2834,6 +2842,7 @@ function openProductStockDetail(pid) {
     });
   }
   openSheet(html);
+  document.getElementById("bCountOne").addEventListener("click", function(){ openCountOne(p); });
   document.getElementById("bEnt").addEventListener("click", function(){ openMovementForm(p, "entrada"); });
   document.getElementById("bSai").addEventListener("click", function(){ openMovementForm(p, "saida"); });
   document.getElementById("bPer").addEventListener("click", function(){ openMovementForm(p, "perda"); });
@@ -2846,6 +2855,116 @@ function openProductStockDetail(pid) {
     });
   }
 }
+
+// ---------- contagem de um produto: o saldo passa a ser o número contado ----------
+function storeIsCentral() { return !!(stores[currentStoreId] && stores[currentStoreId].isCentral); }
+function countDiffKind(d) { return (d.q < d.sys && !storeIsCentral()) ? "contagem_venda" : "contagem"; }
+function countDiffText(sys, q, unit) {
+  var d = Math.round((q - sys) * 1000) / 1000;
+  if (!d) return '<span style="color:var(--green);">sem diferença</span>';
+  if (d < 0) return storeIsCentral() ? '<b style="color:var(--red);">falta ' + fmtQty(-d) + ' ' + esc(unit) + '</b>' : '<b style="color:var(--accent);">venda/consumo de ' + fmtQty(-d) + ' ' + esc(unit) + '</b>';
+  return '<b style="color:var(--amber);">sobra de ' + fmtQty(d) + ' ' + esc(unit) + '</b>';
+}
+function openCountOne(p) {
+  if (!requireOperator()) return;
+  var sys = scopedStock[p.id] ? scopedStock[p.id].quantity : 0, un = p.unit || "un";
+  openSheet('<h2>📋 Contar ' + esc(p.name) + '</h2><div class="sub">Informe <b>quanto tem agora</b>. O saldo passa a ser este número; o anterior fica no histórico' + (storeIsCentral() ? '.' : ' e a diferença para menos entra como <b>venda/consumo</b>.') + '</div>' +
+    '<div class="item-row" style="margin-bottom:10px;">Saldo no sistema: <b>' + fmtQty(sys) + ' ' + esc(un) + '</b></div>' +
+    '<div class="field"><label>Quantidade contada (' + esc(un) + ')*</label><input type="number" inputmode="decimal" id="c1Qty" min="0" step="any" placeholder="Ex: 6"></div>' +
+    '<div class="field"><label>Observação (opcional)</label><input type="text" id="c1Note" placeholder="Ex: contagem do fechamento"></div>' +
+    '<button class="btn btn-primary" id="c1Save">💾 Salvar contagem</button><button class="btn btn-secondary" id="c1Cancel">Cancelar</button>');
+  document.getElementById("c1Cancel").addEventListener("click", closeSheet);
+  setTimeout(function(){ var i = document.getElementById("c1Qty"); if (i) i.focus(); }, 50);
+  document.getElementById("c1Save").addEventListener("click", function(){
+    var q = parseFloat(String(document.getElementById("c1Qty").value).replace(",", "."));
+    if (isNaN(q) || q < 0) { showToast("Informe a quantidade contada"); return; }
+    var note = document.getElementById("c1Note").value.trim(), btn = this;
+    askSave("Contagem de " + p.name, '<div>Saldo no sistema: <b>' + fmtQty(sys) + ' ' + esc(un) + '</b></div><div>Você contou: <b>' + fmtQty(q) + ' ' + esc(un) + '</b></div><div>Diferença: ' + countDiffText(sys, q, un) + '</div>').then(function(ok){
+      if (!ok) return;
+      btn.disabled = true; btn.textContent = "Salvando…";
+      var now = Date.now(), sname = stores[currentStoreId].name, d = {pid: p.id, sys: sys, q: q};
+      var dateTxt = fmtDateShort(todayStr());
+      db.doc("stock/" + currentStoreId + "_" + p.id).set({storeId: currentStoreId, productId: p.id, quantity: q, updatedAt: now}).then(function(){
+        scopedStock[p.id] = {storeId: currentStoreId, productId: p.id, quantity: q, updatedAt: now};
+        if (Math.abs(q - sys) < 1e-9) return;
+        return db.collection("movements").add({storeId: currentStoreId, storeName: sname, productId: p.id, productName: p.name,
+          kind: countDiffKind(d), sysQty: sys, countedQty: q, type: q > sys ? "entrada" : "saida", quantity: Math.abs(q - sys),
+          employeeId: currentEmployeeId, employeeName: currentEmployeeName, timestamp: now,
+          note: (countDiffKind(d) === "contagem_venda" ? "Venda apurada na contagem " : "Ajuste de contagem ") + dateTxt + (note ? " · " + note : "")});
+      }).then(function(){ closeSheet(); showToast("✅ Contagem salva · saldo " + fmtQty(q) + " " + un); })
+        .catch(function(err){ showToast("Erro ao salvar: " + errMsg(err)); btn.disabled = false; btn.textContent = "💾 Salvar contagem"; });
+    });
+  });
+}
+
+// ---------- "Sua informação está correta? Podemos salvar?" ----------
+function askSave(titulo, corpoHtml) {
+  return new Promise(function(resolve){
+    var box = document.getElementById("askSave");
+    if (!box) { box = document.createElement("div"); box.id = "askSave"; document.body.appendChild(box); }
+    box.innerHTML = '<div class="ask-card" role="dialog" aria-modal="true"><div class="ask-t">💾 ' + esc(titulo) + '</div><div class="ask-b">' + corpoHtml + '</div>' +
+      '<div class="ask-q">Sua informação está correta? Podemos salvar?</div>' +
+      '<button class="btn btn-primary" id="askYes">✅ Sim, salvar</button><button class="btn btn-secondary" id="askNo">✏️ Não, corrigir</button></div>';
+    box.style.display = "flex";
+    function done(v){ box.style.display = "none"; box.innerHTML = ""; resolve(v); }
+    document.getElementById("askYes").addEventListener("click", function(){ done(true); });
+    document.getElementById("askNo").addEventListener("click", function(){ done(false); });
+  });
+}
+// pergunta antes de salvar em todos os lançamentos (intercepta o botão e só deixa seguir depois do "Sim")
+var ASK_SAVE_BUTTONS = {
+  bConfirm: function(){
+    var q = parseFloat(String((document.getElementById("movQty") || {}).value || "").replace(",", ".")); if (!(q > 0)) return null;
+    var h2 = sheet.querySelector("h2"), sub = sheet.querySelector(".sub"), t = h2 ? h2.textContent : "Lançamento";
+    var m = /Registrar (entrada|saída|perda)/i.exec(t); if (!m) return null;
+    var tipo = m[1].toLowerCase(), pn = sub ? sub.textContent.split(" — ")[0] : "";
+    var p = null; Object.keys(products).some(function(id){ if (products[id].name === pn) { p = products[id]; return true; } });
+    var cur = p && scopedStock[p.id] ? scopedStock[p.id].quantity : 0, un = p ? (p.unit || "un") : "un";
+    var depois = tipo === "entrada" ? cur + q : cur - q;
+    return {t: t.replace(/^\S+\s/, ""), b: '<div>' + esc(pn) + '</div><div>Quantidade: <b>' + fmtQty(q) + ' ' + esc(un) + '</b></div><div>Saldo: ' + fmtQty(cur) + ' → <b>' + fmtQty(depois) + ' ' + esc(un) + '</b></div>' +
+      (tipo === "entrada" && !storeIsCentral() ? '<div class="ask-warn">⚠️ A entrada <b>soma</b> ao estoque. Se você contou quanto tem, toque em <b>Não, corrigir</b> e use <b>📋 Contar</b>.</div>' : '')};
+  },
+  rrConfirm: function(){
+    var q = parseFloat(String((document.getElementById("rrQty") || {}).value || "").replace(",", ".")); if (!(q > 0)) return null;
+    var nm = (document.getElementById("rrSel") || {}).textContent || "";
+    return {t: "Recebimento de mercadoria", b: '<div>' + esc(nm.replace(/Trocar.*$/, "").trim()) + '</div><div>Quantidade recebida: <b>' + fmtQty(q) + '</b></div><div>Será <b>somada</b> ao estoque.</div>'};
+  },
+  pfSave: function(){
+    var v = function(id){ return parseFloat(String((document.getElementById(id) || {}).value || "").replace(",", ".")) || 0; };
+    if (!(v("pfRaw") > 0)) return null;
+    return {t: "Produção", b: '<div>Peso bruto: <b>' + fmtQty(v("pfRaw")) + ' kg</b></div><div>Produzido: <b>' + fmtQty(v("pfQty")) + ' un</b> (' + fmtQty(v("pfFil")) + ' kg)</div>' +
+      (v("pfIsc") ? '<div>Iscas: ' + fmtQty(v("pfIsc")) + ' kg</div>' : '') + (v("pfDsc") ? '<div>Descarte: ' + fmtQty(v("pfDsc")) + ' kg</div>' : '') +
+      ((document.getElementById("pfStock") || {}).checked ? '<div>Lança no estoque: baixa do insumo e entrada do produzido.</div>' : '')};
+  },
+  bCntSave: function(){ return countSummary(sheet.querySelectorAll(".cntQty"), "Contagem completa"); },
+  fgSaveNow: function(){
+    var ids = Object.keys(fridgeDraft); if (!ids.length) return null;
+    var names = ids.map(function(id){ return products[id] ? products[id].name : id; });
+    return {t: "Contagem de geladeira", b: '<div>' + ids.length + ' bebida(s) com números novos:</div><div class="ask-list">' + names.slice(0, 12).map(esc).join(", ") + (names.length > 12 ? "…" : "") + '</div>'};
+  }
+};
+function countSummary(inputs, titulo) {
+  var lines = [], n = 0, venda = 0;
+  [].forEach.call(inputs, function(inp){
+    var pid = inp.getAttribute("data-pid"), p = products[pid]; if (!p) return;
+    var q = parseFloat(inp.value); if (isNaN(q) || q < 0) q = 0;
+    var sys = scopedStock[pid] ? scopedStock[pid].quantity : 0; if (Math.abs(q - sys) < 1e-9) return;
+    n++; if (q < sys) venda++;
+    if (lines.length < 10) lines.push('<div class="ask-li">' + esc(p.name) + ': ' + fmtQty(sys) + ' → <b>' + fmtQty(q) + '</b> · ' + countDiffText(sys, q, p.unit || "un") + '</div>');
+  });
+  return {t: titulo, b: n ? '<div>' + n + ' produto(s) com diferença. O saldo passa a ser o número contado e o anterior fica no histórico.</div>' + lines.join("") + (n > 10 ? '<div class="ask-li">+ ' + (n - 10) + ' produto(s)</div>' : '') : '<div>Nenhuma diferença em relação ao sistema.</div>'};
+}
+document.addEventListener("click", function(ev){
+  var b = ev.target.closest && ev.target.closest("button"); if (!b || b.disabled) return;
+  var f = ASK_SAVE_BUTTONS[b.id];
+  var cat = !f && b.hasAttribute("data-save") && b.closest("#sheet") ? b.getAttribute("data-save") : null;
+  if (!f && !cat) return;
+  if (b._askOk) { b._askOk = false; return; }
+  var info = f ? f() : countSummary(sheet.querySelectorAll('.cntQty[data-cat="' + cat + '"]'), "Contagem do gênero");
+  if (!info) return; // deixa o próprio botão avisar o que falta preencher
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  askSave(info.t, info.b).then(function(ok){ if (ok) { b._askOk = true; b.click(); } });
+}, true);
 
 function openMovementForm(p, type) {
   if (!requireOperator()) return;
@@ -5917,6 +6036,7 @@ function repRows(type, r) {
 
 var MOV_KINDS = {entrada:"↓ Entrada", saida:"↑ Saída", perda:"⚠ Perda", ajuste:"📋 Ajuste de contagem"};
 function movKind(m) {
+  if (m.kind === "contagem_venda") return "saida";
   if (m.kind === "contagem" || /^(Ajuste de contagem|Contagem parcial|Contagem do produzido)/.test(m.note || "")) return "ajuste";
   return m.type === "perda" ? "perda" : (m.type === "saida" ? "saida" : "entrada");
 }
@@ -6422,7 +6542,7 @@ function renderGeladeira() {
     '<div class="field" style="margin-bottom:8px;"><label>Loja</label><input type="text" value="' + esc(sname) + '" disabled></div></div>';
   html += '<div class="fg-howto"><div><b>☀️ Turno almoço · ' + FRIDGE_SHIFTS.lunch + '</b>Conte quantas tem na geladeira e informe quanto você colocou.</div>' +
     '<div><b>🌙 Turno jantar · ' + FRIDGE_SHIFTS.dinner + '</b>Conte de novo e informe quanto colocou.</div>' +
-    '<span>O sistema salva sozinho e calcula quanto saiu em cada turno.' + (editable ? '' : ' <b style="color:var(--amber);">Dia anterior: somente leitura.</b>') + '</span></div>';
+    '<span>Ao terminar, toque em <b>💾 Salvar contagem</b>. O sistema calcula quanto saiu em cada turno.' + (editable ? '' : ' <b style="color:var(--amber);">Dia anterior: somente leitura.</b>') + '</span></div>';
   html += '<div id="fgStatus" style="font-size:12px;color:var(--text-2);min-height:16px;margin-bottom:6px;">' + esc(fridgeStatusText) + '</div>';
   if (!items.length) {
     html += '<div class="empty-state"><div class="emoji">🥤</div>Nenhuma bebida vinculada a ' + esc(sname) + '.<br>' +
@@ -6462,7 +6582,7 @@ function renderGeladeira() {
     html += '<div style="font-size:11.5px;color:var(--text-2);margin:-2px 0 12px 0;">Saída do almoço = contagem ' + FRIDGE_SHIFTS.lunch + ' + abastecido ' + FRIDGE_SHIFTS.lunch + ' − contagem ' + FRIDGE_SHIFTS.dinner + '.<br>Saída do jantar = contagem ' + FRIDGE_SHIFTS.dinner + ' + abastecido ' + FRIDGE_SHIFTS.dinner + ' − contagem ' + FRIDGE_SHIFTS.lunch + ' do dia seguinte.</div>';
   }
   html += '<div class="field"><label>Observações</label><textarea class="fgInp" id="fgNotes" data-ff="notes" rows="2"' + (editable ? '' : ' disabled') + '>' + esc(fridgeDay && fridgeDay.notes || "") + '</textarea></div>';
-  if (editable && items.length) html += '<div class="fg-savebar"><button class="btn btn-primary" id="fgSaveNow">💾 Salvar contagem</button><div id="fgSaveInfo">' + esc(fridgeStatusText || "Os números também são salvos sozinhos enquanto você digita.") + '</div></div>';
+  if (editable && items.length) html += '<div class="fg-savebar"><button class="btn btn-primary" id="fgSaveNow">💾 Salvar contagem</button><div id="fgSaveInfo">' + esc(fridgeStatusText || "Toque para gravar os números digitados.") + '</div></div>';
   if (fridgeDay && fridgeDay.updatedAt) html += '<div style="font-size:11.5px;color:var(--text-2);">Última alteração: ' + fmtDate(fridgeDay.updatedAt) + (fridgeDay.updatedByName ? ' por ' + esc(fridgeDay.updatedByName) : '') + '</div>';
   content.innerHTML = html;
   bindGeladeira();
@@ -6477,6 +6597,7 @@ function bindGeladeira() {
   if (d) d.addEventListener("change", function(e){
     if (!e.target.value) return;
     if (!canManageFridge() && e.target.value > todayStr()) { e.target.value = fridgeDate; return; }
+    if (Object.keys(fridgeDraft).length && !confirm("Há números não salvos nesta data. Trocar de data e descartar?")) { e.target.value = fridgeDate; return; }
     fridgeDate = e.target.value; subscribeScoped("geladeira");
   });
   var el = document.getElementById("fgEditList");
@@ -6491,10 +6612,10 @@ function bindGeladeira() {
       updateFridgeRowCalc(id);
       scheduleFridgeSave(id);
     });
-    inp.addEventListener("blur", function(){ flushFridgeSave(inp.getAttribute("data-fid")); setTimeout(function(){ if (fridgePendingRender && currentRoute === "geladeira") renderGeladeira(); }, 80); });
+    inp.addEventListener("blur", function(){ setTimeout(function(){ if (fridgePendingRender && currentRoute === "geladeira") renderGeladeira(); }, 80); });
   });
   var n = document.getElementById("fgNotes");
-  if (n) n.addEventListener("change", function(){ saveFridgeFields({notes: n.value.trim()}); });
+  if (n) n.addEventListener("change", function(){ setFridgeStatus("⚠️ Observação ainda não salva — toque em 💾 Salvar contagem"); });
   var sv = document.getElementById("fgSaveNow");
   if (sv) sv.addEventListener("click", function(){
     var pend = Object.keys(fridgeDraft);
@@ -6511,11 +6632,11 @@ function updateFridgeRowCalc(id) {
   var el = content.querySelector('[data-fout="' + id + '"]'); if (el) el.innerHTML = fridgeOutHtml(k);
 }
 
+window.addEventListener("beforeunload", function(e){ if (currentRoute === "geladeira" && Object.keys(fridgeDraft).length) { e.preventDefault(); e.returnValue = ""; } });
 function setFridgeStatus(txt) { fridgeStatusText = txt; var s = document.getElementById("fgStatus"); if (s) s.textContent = txt; var i = document.getElementById("fgSaveInfo"); if (i) i.textContent = txt; }
 function scheduleFridgeSave(id) {
   clearTimeout(fridgeSaveTimers[id]);
-  setFridgeStatus("Alterações não salvas…");
-  fridgeSaveTimers[id] = setTimeout(function(){ flushFridgeSave(id); }, 900);
+  setFridgeStatus("⚠️ Números ainda não salvos — toque em 💾 Salvar contagem");
 }
 function flushFridgeSave(id) {
   if (!id || !fridgeDraft[id]) return;
