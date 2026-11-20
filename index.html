@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta name="app-build" content="20261120192246">
+<meta name="app-build" content="20261120194437">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Gestão Operacional</title>
@@ -464,6 +464,7 @@
 .sd-row:first-child { border-top:0; } .sd-day { width:40px; flex:none; text-align:center; line-height:1.1; } .sd-day b { font-size:16px; display:block; } .sd-day small { font-size:11px; color:var(--text-2); }
 .sd-info { flex:1; min-width:0; } .sd-info small { display:block; font-size:11.5px; color:var(--text-2); } .sd-val { white-space:nowrap; }
 .sd-row .btn { width:auto; margin:0; } .sd-row.sd-miss { background:var(--red-bg); color:var(--red); border-left:4px solid var(--red); } .sd-row.sd-miss .sd-day small { color:var(--red); }
+.sd-row.sd-click { cursor:pointer; } .sd-row.sd-click:active { background:var(--surface-2); }
 .sd-row.sd-fut { opacity:.5; } .sd-misscount { color:#fff; background:var(--red); border-radius:6px; padding:1px 7px; font-size:12px; margin-left:4px; } .sd-okcount { color:var(--green); font-size:12px; margin-left:4px; }
 </style>
 </head>
@@ -5191,7 +5192,7 @@ function renderVendas() {
     var monthSales = scopedSales.filter(function(s){return (s.date||"").indexOf(month)===0;});
     if (monthSales.length) {
       var dmap = {}; monthSales.forEach(function(s){ dmap[s.date] = (dmap[s.date] || 0) + (s.amount || 0); });
-      html += '<div class="chart-wrap"><div class="chart-title">📊 Venda por dia <small style="font-weight:500;color:var(--text-2);">· em verde os 3 dias de maior fluxo</small></div>' + dailyChart(dmap, month) + '</div>' +
+      html += '<div class="chart-wrap"><div class="chart-title">📊 Venda por dia (almoço + jantar) <small style="font-weight:500;color:var(--text-2);">· em verde os 3 dias de maior fluxo · toque no dia para ver separado</small></div>' + dailyChart(dmap, month) + '</div>' +
         '<div class="chart-wrap"><div class="chart-title">📅 Média por dia da semana</div>' + weekdayChart(monthSales) + '</div>';
     }
     html += salesDaysHtml(monthSales, month, {editAttr: "data-editsale", canAdd: !isCentralStore});
@@ -5246,6 +5247,7 @@ function renderVendas() {
 function bindVendas(isCentralStore) {
   var add = document.getElementById("bAdd");
   if (add) add.addEventListener("click", function(){ openSaleForm(); });
+  content.querySelectorAll("[data-sday]").forEach(function(r){ r.addEventListener("click", function(){ openSaleDayDetail(r.getAttribute("data-sday"), scopedSales); }); });
   content.querySelectorAll("[data-addsale]").forEach(function(b){ b.addEventListener("click", function(){ openSaleForm(b.getAttribute("data-addsale")); }); });
   document.getElementById("vMonth").addEventListener("change", function(e){ custosMonth = e.target.value; subscribeScoped("vendas"); });
   content.querySelectorAll("[data-vmode]").forEach(function(t){
@@ -5258,6 +5260,30 @@ function bindVendas(isCentralStore) {
     var s = scopedSales.filter(function(x){ return x.id === b.getAttribute("data-editsale"); })[0]; if (s) openSaleEdit(s); }); });
 }
 var WEEKDAYS = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+function saleVal(id) { var v = (document.getElementById(id) || {}).value; if (v === "" || v === undefined) return 0; var n = parseFloat(String(v).replace(",", ".")); return isNaN(n) ? -1 : n; }
+function saleHasSplit(s) { return s && (typeof s.amountLunch === "number" || typeof s.amountDinner === "number"); }
+// detalhe de um dia: almoço e jantar separados
+function openSaleDayDetail(date, list, after) {
+  var arr = list.filter(function(s){ return s.date === date; }); if (!arr.length) return;
+  var L = 0, D = 0, N = 0, T = 0, isDir = currentRole() === "Diretoria";
+  arr.forEach(function(s){ T += s.amount || 0; if (saleHasSplit(s)) { L += s.amountLunch || 0; D += s.amountDinner || 0; } else N += s.amount || 0; });
+  function pct(v){ return T ? ' <small>(' + (v / T * 100).toFixed(0) + '%)</small>' : ''; }
+  var h = '<h2>💵 Venda de ' + fmtDateShort(date) + ' · ' + WEEKDAYS[new Date(date + "T12:00:00").getDay()] + '</h2><div class="sub">' + esc(stores[arr[0].storeId] ? stores[arr[0].storeId].name : (arr[0].storeName || "")) + '</div>' +
+    '<div class="stat-grid"><div class="stat-box"><div class="num">' + fmtMoney(L) + '</div><div class="label">☀️ almoço' + pct(L) + '</div></div>' +
+    '<div class="stat-box"><div class="num">' + fmtMoney(D) + '</div><div class="label">🌙 jantar' + pct(D) + '</div></div>' +
+    (N ? '<div class="stat-box wide"><div class="num">' + fmtMoney(N) + '</div><div class="label">sem divisão (lançamento antigo ou Saipos)</div></div>' : '') +
+    '<div class="stat-box wide"><div class="num">' + fmtMoney(T) + '</div><div class="label">total do dia</div></div></div>';
+  if (arr.length > 1 || isDir) h += arr.map(function(s){
+    return '<div class="item-row" style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><span>' + (s.source === "saipos" ? 'Saipos' : esc(s.employeeName || "Lançamento")) +
+      '<br><small style="color:var(--text-2);">' + (saleHasSplit(s) ? '☀️ ' + fmtMoney(s.amountLunch || 0) + ' · 🌙 ' + fmtMoney(s.amountDinner || 0) : 'sem divisão') + '</small></span><b>' + fmtMoney(s.amount) + '</b>' +
+      (isDir ? '<button class="link-btn" data-sdedit="' + s.id + '">✏️</button>' : '') + '</div>';
+  }).join("");
+  h += '<button class="btn btn-secondary" id="sddClose">' + (after ? 'Voltar' : 'Fechar') + '</button>';
+  openSheet(h);
+  document.getElementById("sddClose").addEventListener("click", function(){ if (after) after(); else closeSheet(); });
+  sheet.querySelectorAll("[data-sdedit]").forEach(function(b){ b.addEventListener("click", function(){
+    var s = arr.filter(function(x){ return x.id === b.getAttribute("data-sdedit"); })[0]; if (s) openSaleEdit(s, after); }); });
+}
 // lançamentos do mês, do dia 1 ao último; dias já passados sem venda ficam em vermelho
 function salesDaysHtml(list, month, opt) {
   opt = opt || {};
@@ -5269,8 +5295,9 @@ function salesDaysHtml(list, month, opt) {
     var dayLbl = '<span class="sd-day"><b>' + String(d).padStart(2, "0") + '</b><small>' + wd + '</small></span>';
     if (arr.length) {
       arr.forEach(function(s){
-        rows += '<div class="sd-row">' + dayLbl + '<span class="sd-info">Venda do dia' + (s.source === "saipos" ? ' <span class="pdv-tag">Saipos</span>' : '') +
-          '<small>' + (s.source === "saipos" ? (s.salesCount || 0) + ' venda(s) · sem taxa de serviço' : esc(s.employeeName || "")) + '</small></span>' +
+        rows += '<div class="sd-row sd-click" data-sday="' + ds + '">' + dayLbl + '<span class="sd-info">Venda do dia' + (s.source === "saipos" ? ' <span class="pdv-tag">Saipos</span>' : '') +
+          '<small>' + (saleHasSplit(s) ? '☀️ ' + fmtMoney(s.amountLunch || 0) + ' · 🌙 ' + fmtMoney(s.amountDinner || 0) + ' · ' : '') +
+          (s.source === "saipos" ? (s.salesCount || 0) + ' venda(s) · sem taxa de serviço' : esc(s.employeeName || "")) + '</small></span>' +
           '<b class="sd-val">' + fmtMoney(s.amount) + '</b>' + (isDir ? '<button class="link-btn" ' + opt.editAttr + '="' + s.id + '" title="Editar">✏️</button>' : '') + '</div>';
       });
     } else if (ds <= today) {
@@ -5293,7 +5320,8 @@ function dailyChart(days, month) {
   var svg = '<svg viewBox="0 0 ' + w + ' ' + (h + 18) + '" width="100%" role="img" aria-label="Venda por dia">';
   vals.forEach(function(x, i){
     var bh = x.v / max * h, wd = new Date(month + "-" + String(x.d).padStart(2,"0") + "T12:00:00").getDay();
-    svg += '<rect x="' + (i * bw + 1).toFixed(1) + '" y="' + (h - bh).toFixed(1) + '" width="' + Math.max(bw - 2, 1).toFixed(1) + '" height="' + Math.max(bh, x.v ? 2 : 0).toFixed(1) + '" rx="2" fill="' + (top.indexOf(x.k) !== -1 ? 'var(--green)' : 'var(--accent)') + '"' + (wd === 0 || wd === 6 ? ' opacity=".8"' : ' opacity=".55"') + '><title>' + fmtDateShort(x.k) + ' (' + WEEKDAYS[wd] + '): ' + fmtMoney(x.v) + '</title></rect>';
+    if (x.v) svg += '<rect data-sday="' + x.k + '" x="' + (i * bw).toFixed(1) + '" y="0" width="' + bw.toFixed(1) + '" height="' + h + '" fill="transparent" style="cursor:pointer;"><title>' + x.d + ': ' + fmtMoney(x.v) + '</title></rect>';
+    svg += '<rect style="pointer-events:none;" x="' + (i * bw + 1).toFixed(1) + '" y="' + (h - bh).toFixed(1) + '" width="' + Math.max(bw - 2, 1).toFixed(1) + '" height="' + Math.max(bh, x.v ? 2 : 0).toFixed(1) + '" rx="2" fill="' + (top.indexOf(x.k) !== -1 ? 'var(--green)' : 'var(--accent)') + '"' + (wd === 0 || wd === 6 ? ' opacity=".8"' : ' opacity=".55"') + '><title>' + fmtDateShort(x.k) + ' (' + WEEKDAYS[wd] + '): ' + fmtMoney(x.v) + '</title></rect>';
     if (x.d === 1 || x.d % 5 === 0) svg += '<text x="' + (i * bw + bw / 2).toFixed(1) + '" y="' + (h + 13) + '" font-size="9" fill="var(--text-2)" text-anchor="middle">' + x.d + '</text>';
   });
   return svg + '</svg>';
@@ -5321,7 +5349,7 @@ function openStoreSalesDetail(sid, month) {
   if (!list.length) {
     h += '<div class="empty-state"><div class="emoji">📈</div>Nenhuma venda lançada neste mês.</div>';
   } else {
-    h += '<div class="chart-wrap"><div class="chart-title">📊 Venda por dia <small style="font-weight:500;color:var(--text-2);">· em verde os 3 dias de maior fluxo</small></div>' + dailyChart(days, month) + '</div>';
+    h += '<div class="chart-wrap"><div class="chart-title">📊 Venda por dia (almoço + jantar) <small style="font-weight:500;color:var(--text-2);">· em verde os 3 dias de maior fluxo · toque no dia para ver separado</small></div>' + dailyChart(days, month) + '</div>';
     h += '<div class="chart-wrap"><div class="chart-title">📅 Média por dia da semana</div>' + weekdayChart(list) + '</div>';
     h += '<div class="chart-title">🏆 Dias de maior fluxo</div>' + best.map(function(k, i){
       return '<div class="item-row" style="display:flex;justify-content:space-between;"><span>' + ["🥇","🥈","🥉"][i] + ' ' + fmtDateShort(k) + ' (' + WEEKDAYS[new Date(k + "T12:00:00").getDay()] + ')</span><b>' + fmtMoney(days[k]) + '</b></div>';
@@ -5331,7 +5359,8 @@ function openStoreSalesDetail(sid, month) {
   h += '<button class="btn btn-secondary" id="bSdClose">Fechar</button>';
   openSheet(h);
   document.getElementById("bSdClose").addEventListener("click", closeSheet);
-  sheet.querySelectorAll("[data-dsale]").forEach(function(b){ b.addEventListener("click", function(){
+  sheet.querySelectorAll("[data-sday]").forEach(function(r){ r.addEventListener("click", function(){ openSaleDayDetail(r.getAttribute("data-sday"), list, function(){ openStoreSalesDetail(sid, month); }); }); });
+  sheet.querySelectorAll("[data-dsale]").forEach(function(b){ b.addEventListener("click", function(ev){ ev.stopPropagation();
     var s = list.filter(function(x){ return x.id === b.getAttribute("data-dsale"); })[0]; if (s) openSaleEdit(s, function(){ openStoreSalesDetail(sid, month); });
   }); });
 }
@@ -5340,20 +5369,29 @@ function openSaleEdit(s, after) {
   if (currentRole() !== "Diretoria") { showToast("Somente a Diretoria pode editar vendas"); return; }
   var h = '<h2>✏️ Editar venda</h2><div class="sub">' + esc(stores[s.storeId] ? stores[s.storeId].name : (s.storeName || "")) + (s.employeeName ? ' · lançada por ' + esc(s.employeeName) : '') + '</div>' +
     (s.source === "saipos" ? '<div class="item-row" style="border-color:var(--amber);margin-bottom:10px;">⚠️ Venda vinda do Saipos. Se você alterar, a próxima sincronização pode trazer o valor do PDV de novo.</div>' : '') +
-    '<div class="row2"><div class="field"><label>Data</label><input type="date" id="seDate" value="' + esc(s.date || "") + '"></div>' +
-    '<div class="field"><label>Valor</label><input type="number" inputmode="decimal" id="seAmount" min="0" step="any" value="' + (s.amount || "") + '"></div></div>' +
+    '<div class="field"><label>Data</label><input type="date" id="seDate" value="' + esc(s.date || "") + '"></div>' +
+    (saleHasSplit(s) ? '' : '<div class="item-row" style="margin-bottom:10px;font-size:13px;">Lançada sem divisão: <b>' + fmtMoney(s.amount) + '</b>. Informe almoço e jantar para separar.</div>') +
+    '<div class="row2"><div class="field"><label>☀️ Venda almoço (R$)</label><input type="number" inputmode="decimal" id="seLunch" min="0" step="any" value="' + (saleHasSplit(s) ? (s.amountLunch || 0) : '') + '" placeholder="0,00"></div>' +
+    '<div class="field"><label>🌙 Venda jantar (R$)</label><input type="number" inputmode="decimal" id="seDinner" min="0" step="any" value="' + (saleHasSplit(s) ? (s.amountDinner || 0) : '') + '" placeholder="0,00"></div></div>' +
+    '<div class="total-line" style="margin-bottom:12px;"><span>Total do dia</span><span id="seTotal">' + fmtMoney(s.amount) + '</span></div>' +
     '<button class="btn btn-primary" id="seSave">Salvar alteração</button>' +
     '<button class="btn btn-secondary" id="seDel" style="color:var(--red);">🗑️ Excluir esta venda</button>' +
     '<button class="btn btn-secondary" id="seCancel">Cancelar</button>';
   openSheet(h);
   function done(msg){ showToast(msg); if (after) after(); else closeSheet(); networkCmvCache = {}; if (currentRoute === "vendas") renderVendas(); }
   document.getElementById("seCancel").addEventListener("click", function(){ if (after) after(); else closeSheet(); });
+  ["seLunch","seDinner"].forEach(function(id){ document.getElementById(id).addEventListener("input", function(){
+    var t = saleVal("seLunch") + saleVal("seDinner"); document.getElementById("seTotal").textContent = fmtMoney(t || s.amount); }); });
   document.getElementById("seSave").addEventListener("click", function(){
-    var amount = parseFloat(document.getElementById("seAmount").value), date = document.getElementById("seDate").value;
-    if (!amount || amount <= 0 || !date) { showToast("Informe data e valor válidos"); return; }
+    var date = document.getElementById("seDate").value, lunch = saleVal("seLunch"), dinner = saleVal("seDinner");
+    var typed = document.getElementById("seLunch").value !== "" || document.getElementById("seDinner").value !== "";
+    var amount = typed ? Math.round((lunch + dinner) * 100) / 100 : s.amount;
+    if (!(amount > 0) || !date || lunch < 0 || dinner < 0) { showToast("Informe data e valores válidos"); return; }
+    var upd = {date: date, amount: amount, editedAt: Date.now(), editedBy: currentEmployeeName, previousAmount: s.amount, previousDate: s.date};
+    if (typed) { upd.amountLunch = lunch; upd.amountDinner = dinner; }
     this.disabled = true;
-    db.doc("sales/" + s.id).update({date: date, amount: amount, editedAt: Date.now(), editedBy: currentEmployeeName, previousAmount: s.amount, previousDate: s.date})
-      .then(function(){ s.date = date; s.amount = amount; done("Venda alterada"); })
+    db.doc("sales/" + s.id).update(upd)
+      .then(function(){ Object.assign(s, upd); done("Venda alterada"); })
       .catch(function(err){ showToast("Erro: " + errMsg(err)); document.getElementById("seSave").disabled = false; });
   });
   document.getElementById("seDel").addEventListener("click", function(){
@@ -5368,14 +5406,18 @@ function openSaleForm(dateStr) {
   if (!requireRole(["Gerência","Diretoria"])) return;
   if (typeof dateStr !== "string") dateStr = todayStr();
   var html = '<h2>Lançar venda</h2>' +
-    '<div class="row2"><div class="field"><label>Data</label><input type="date" id="sDate" value="' + dateStr + '"></div>' +
-    '<div class="field"><label>Valor</label><input type="number" inputmode="decimal" id="sAmount" min="0" step="any" placeholder="0,00"></div></div>' +
+    '<div class="field"><label>Data</label><input type="date" id="sDate" value="' + dateStr + '"></div>' +
+    '<div class="row2"><div class="field"><label>☀️ Venda almoço (R$)</label><input type="number" inputmode="decimal" id="sLunch" min="0" step="any" placeholder="0,00"></div>' +
+    '<div class="field"><label>🌙 Venda jantar (R$)</label><input type="number" inputmode="decimal" id="sDinner" min="0" step="any" placeholder="0,00"></div></div>' +
+    '<div class="total-line" style="margin-bottom:12px;"><span>Total do dia</span><span id="sTotal">R$ 0,00</span></div>' +
     '<button class="btn btn-primary" id="bSave">Salvar</button><button class="btn btn-secondary" id="bCancel">Cancelar</button>';
   openSheet(html);
   document.getElementById("bCancel").addEventListener("click", closeSheet);
+  ["sLunch","sDinner"].forEach(function(id){ document.getElementById(id).addEventListener("input", function(){
+    document.getElementById("sTotal").textContent = fmtMoney(saleVal("sLunch") + saleVal("sDinner")); }); });
   document.getElementById("bSave").addEventListener("click", function(){
-    var amount = parseFloat(document.getElementById("sAmount").value);
-    if (!amount || amount<=0) { showToast("Informe um valor válido"); return; }
+    var lunch = saleVal("sLunch"), dinner = saleVal("sDinner"), amount = Math.round((lunch + dinner) * 100) / 100;
+    if (lunch < 0 || dinner < 0 || !(amount > 0)) { showToast("Informe a venda do almoço e/ou do jantar"); return; }
     var sDay = document.getElementById("sDate").value || todayStr();
     if (scopedSales.some(function(x){ return x.source === "saipos" && x.date === sDay; }) &&
         !confirm("Este dia já tem a venda vinda do Saipos automaticamente. Lançar aqui vai SOMAR ao valor do Saipos. Continuar?")) return;
@@ -5383,8 +5425,8 @@ function openSaleForm(dateStr) {
     var btn = document.getElementById("bSave"); btn.disabled=true; btn.textContent="Salvando…";
     db.collection("sales").add({
       storeId:currentStoreId, storeName:storeName, date:document.getElementById("sDate").value||todayStr(),
-      amount:amount, employeeId:currentEmployeeId, employeeName:currentEmployeeName, createdAt:Date.now()
-    }).then(function(){ networkCmvCache = {}; closeSheet(); showToast("Venda lançada"); })
+      amount:amount, amountLunch:lunch, amountDinner:dinner, employeeId:currentEmployeeId, employeeName:currentEmployeeName, createdAt:Date.now()
+    }).then(function(){ networkCmvCache = {}; closeSheet(); showToast("Venda lançada: " + fmtMoney(amount)); })
       .catch(function(){ showToast("Erro ao salvar"); btn.disabled=false; btn.textContent="Salvar"; });
   });
 }
